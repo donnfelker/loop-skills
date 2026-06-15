@@ -59,21 +59,6 @@ Install via Claude Code's built-in plugin system:
 /plugin install multi-llm-convergence@loop-skills
 ```
 
-### Option 3: SkillKit (Multi-Agent)
-
-Use [SkillKit](https://github.com/rohitg00/skillkit) to install skills across multiple AI agents (Claude Code, Cursor, Copilot, etc.):
-
-```bash
-# Install everything
-npx skillkit install donnfelker/loop-skills
-
-# Install specific skills
-npx skillkit install donnfelker/loop-skills --skill dev-team pr-autopilot
-
-# List available skills
-npx skillkit install donnfelker/loop-skills --list
-```
-
 Each `/skill` still works standalone once installed — `/dev-team`, `/pr-autopilot`, `/implement-full-spec`, `/plan-to-tickets`, `/triangulated-code-review`, `/multi-llm-convergence`.
 
 ### Plugin dependencies
