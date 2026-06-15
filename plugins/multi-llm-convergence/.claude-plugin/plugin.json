@@ -1,0 +1,6 @@
+{
+  "name": "multi-llm-convergence",
+  "description": "Drives any artifact — a plan, PRD, design doc, spec, or implementation diff — to convergence by alternating two genuinely different LLM reviewers (a Codex reviewer and an independent Claude review subagent), applying each round's findings and looping until both independently agree the artifact clears the bar (default: no critical/high findings). Grounds offline reviewers in local source-of-truth clones so they don't stall, runs a liveness watchdog so a silent reviewer can't hang the loop, and commits per round for an auditable convergence trail.",
+  "version": "0.1.0",
+  "license": "MIT"
+}

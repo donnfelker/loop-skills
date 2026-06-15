@@ -1,0 +1,6 @@
+{
+  "name": "pr-autopilot",
+  "description": "Autonomously watch a single pull request and drive its review feedback to completion without supervision. Each round it fetches every unaddressed review and comment (from Claude, CodeRabbit, Copilot, other bots, and humans), addresses the actionable ones, commits and pushes, replies/resolves the threads, and re-requests review — then loops until a quiet round or a safety cap. Includes a --single-pass mode (one autonomous round, no loop) for a one-shot comment sweep. Owns the shared pr-review-mechanics.md reference.",
+  "version": "1.0.0",
+  "license": "MIT"
+}

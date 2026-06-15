@@ -1,0 +1,6 @@
+{
+  "name": "spec-development",
+  "description": "End-to-end spec workflow: plan-to-tickets (import a structured plan into a task tracker — ClickUp, Linear, Jira, Asana, Notion, GitHub Projects, or a markdown fallback — as a ticket hierarchy) and implement-full-spec (turn a parent ticket with N actionable subtasks into N stacked pull requests and drive each to merge-ready through multi-round bot and human review). Depends on the dev-team plugin (per-subtask build/QA/review loop) and the pr-autopilot plugin (per-PR review-response) — install all three.",
+  "version": "1.0.0",
+  "license": "MIT"
+}

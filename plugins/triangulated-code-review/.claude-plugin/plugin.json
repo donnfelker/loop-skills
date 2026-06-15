@@ -1,0 +1,6 @@
+{
+  "name": "triangulated-code-review",
+  "description": "Triangulated multi-reviewer code review orchestrator. Borrows from research methodology — checks each finding against multiple independent reviewers (comprehensive, security, codex, codex adversarial) to reduce blind spots, then runs a QA analyst pass that substantiates every finding (using the context7 MCP to verify third-party library claims) and demotes any unsubstantiated ones into a dedicated 'Invalidated Findings' section of the prioritized, timestamped report.",
+  "version": "1.3.0",
+  "license": "MIT"
+}

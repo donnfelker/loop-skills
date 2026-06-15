@@ -1,0 +1,6 @@
+{
+  "name": "dev-team",
+  "description": "Drive a single unit of work — one spec, ticket, finding, or change request — from spec to a committed, reviewed result with a dev team of coordinating agents: Dev to QA to Reviewer in a bounded cycle. Runs as an agent team when the harness supports one, else as coordinated subagents. Usable standalone for any rigorous change, or as the per-subtask engine behind implement-full-spec.",
+  "version": "1.0.0",
+  "license": "MIT"
+}
