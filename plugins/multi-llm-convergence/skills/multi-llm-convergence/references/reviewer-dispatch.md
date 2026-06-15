@@ -24,6 +24,7 @@ Rules:
 - Verify, don't assume. For any claim about a third-party library/framework/API/CLI, open the local source above and confirm the actual signature/behavior/version. If the source contradicts a concern you had, drop the concern.
 - Internal/first-party code: read it in the repo; don't speculate.
 - Only report real issues. Do not pad. A short, correct list beats a long, hedged one.
+- Hold the artifact to these general rules and report violations as findings: (1) Think before coding — unstated assumptions, unsurfaced tradeoffs, or ambiguity resolved silently. (2) Simplicity first — speculative features, needless abstraction/configurability, error handling for impossible cases, code that could be far shorter. (3) Surgical changes — edits that touch more than the request required, drive-by refactors, or style churn in untouched code. (4) Goal-driven execution — changes with no verifiable success criterion (e.g. behavior changed with no test that pins it down).
 - Severity: critical (the artifact is wrong/will fail as written), high (serious correctness or design flaw), medium (quality/clarity), low (nit).
 
 Return ONLY this JSON object — no preamble, no trailing commentary:

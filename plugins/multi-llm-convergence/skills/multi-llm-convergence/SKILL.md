@@ -100,6 +100,8 @@ The supervision loop, either path:
 
 ## Steps 4 & 6 — Apply findings and commit the round
 
+Apply findings under the general rules in `references/coding-guidelines.md`: think before editing, keep the change minimal, stay surgical (touch only what the finding requires), and edit toward a verifiable success criterion. These bind both the driver and the reviewers — see below.
+
 - Apply every finding **at or above the bar**. Findings below the bar (e.g. `medium`/`low` when the bar is `high`) are recorded in the log but don't block convergence; apply them only if cheap and clearly correct.
 - When a reviewer's claim touches an external library, verify it against the Step-1 local clone before acting — reviewers (both models) hallucinate APIs. If the clone contradicts the finding, record it as **rejected (contradicted by source)** in the log and don't apply it.
 - Commit each round on its own: `converge: round <N> — apply <model> review`. Per-round commits are the auditable trail; they also let you `diff` to detect oscillation (Step 7).
