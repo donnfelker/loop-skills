@@ -26,6 +26,25 @@ Plugins are packages of skills, commands, agents, and hooks that extend Claude C
 
 ## Installation
 
+### Option 1: CLI Install (Recommended)
+
+Use [npx skills](https://github.com/vercel-labs/skills) to install skills directly:
+
+```bash
+# Install everything
+npx skills add donnfelker/loop-skills
+
+# Install specific skills
+npx skills add donnfelker/loop-skills --skill dev-team pr-autopilot
+
+# List available skills
+npx skills add donnfelker/loop-skills --list
+```
+
+This installs to your `.agents/skills/` directory (and symlinks into `.claude/skills/` for Claude Code compatibility).
+
+### Option 2: Claude Code Plugin
+
 Install via Claude Code's built-in plugin system:
 
 ```bash
@@ -40,7 +59,22 @@ Install via Claude Code's built-in plugin system:
 /plugin install multi-llm-convergence@loop-skills
 ```
 
-Each `/skill` still works standalone once its plugin is installed — `/dev-team`, `/pr-autopilot`, `/implement-full-spec`, `/plan-to-tickets`, `/triangulated-code-review`, `/multi-llm-convergence`.
+### Option 3: SkillKit (Multi-Agent)
+
+Use [SkillKit](https://github.com/rohitg00/skillkit) to install skills across multiple AI agents (Claude Code, Cursor, Copilot, etc.):
+
+```bash
+# Install everything
+npx skillkit install donnfelker/loop-skills
+
+# Install specific skills
+npx skillkit install donnfelker/loop-skills --skill dev-team pr-autopilot
+
+# List available skills
+npx skillkit install donnfelker/loop-skills --list
+```
+
+Each `/skill` still works standalone once installed — `/dev-team`, `/pr-autopilot`, `/implement-full-spec`, `/plan-to-tickets`, `/triangulated-code-review`, `/multi-llm-convergence`.
 
 ### Plugin dependencies
 
