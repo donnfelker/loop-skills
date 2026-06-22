@@ -126,7 +126,7 @@ Field contract:
 | `invoke` | **argv array** (no shell string). Placeholders `{prompt}`, `{schema_file}`, `{out_file}`, all substituted at dispatch: the multi-line review contract is injected as the single `{prompt}` element (no shell-escaping), and the orchestrator writes the findings-contract JSON Schema to a temp `{schema_file}` and picks a temp `{out_file}`. An adapter whose CLI has no schema flag simply omits those two placeholders. |
 | `stream_invoke_extra` | Extra argv appended for the streamed/liveness variant (e.g. `--json`, `--output-format stream-json`). |
 | `result` | Where the final structured text is read from: `out_file`, `stdout`, or a JSON path. Each JSON-output CLI has its own envelope key, so the path is per-adapter — claude `.result`, gemini `.response`. |
-| `smoke_test` | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the token ⇒ reachability pass). Preflight pairs it with a **negative read-only probe** on the chosen dispatch path — a write attempt that must be refused (native subagents are read-only by construction). Both must pass. |
+| `smoke_test` | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the token ⇒ reachability pass). Preflight pairs it with a **negative read-only probe** on the chosen dispatch path — a write attempt that must be blocked at enforcement level (a model that merely *declines* is inconclusive, not a pass; native subagents are read-only by construction). Both must pass. |
 | `native_subagent` | Optional host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). Else null ⇒ use the CLI. |
 
 **Uniformity rule (extensibility backbone):** *every* adapter prompt-enforces
@@ -191,22 +191,31 @@ subagent need not have its CLI installed). Each smoke test has **two parts**:
 
 1. **Reachability:** a trivial prompt returns the OK token ⇒ installed,
    authenticated, and able to reach its API.
-2. **Read-only:** the reviewer must be unable to write. A native subagent is
-   read-only **by construction** — the host grants it no edit/write/shell tools. A
-   CLI reviewer's read-only-ness rests on a *flag*, so it gets a **negative probe**:
-   asked to modify a scratch file, the attempt must be refused. This is what
-   actually proves the read-only property the loop's correctness depends on —
+2. **Read-only:** the reviewer must be *unable* to write — proven, not promised. A
+   native subagent is read-only **by construction** (the host grants it no
+   edit/write/shell tools). A CLI reviewer's read-only-ness rests on a *flag*, so it
+   gets a **negative probe**: it is told to write a sentinel to a scratch path and
+   report what happened, graded three ways:
+   - **pass** — the write was *attempted* and *blocked at enforcement level* (a
+     sandbox/policy denial) **and** the scratch file is verified unchanged;
+   - **inconclusive** — the model *declined without attempting* ("I can't write in
+     plan mode"). This does **not** count as read-only verified: a polite decline at
+     preflight says nothing about what a prompt injection in the reviewed artifact
+     could later induce. Treat as fail/abstain;
+   - **fail** — the scratch file was written.
+
+   Nothing short of an observed enforcement-level denial certifies the adapter —
    `--help` only shows a flag *exists*, not that `Bash`/shell/edit are blocked, and
    a soft-read-only adapter (e.g. gemini, whose headless policy auto-allows
-   `exit_plan_mode` → YOLO) can otherwise escape to write. A CLI reviewer that
-   writes during the probe **fails** and is not counted.
+   `exit_plan_mode` → YOLO) can otherwise escape to write.
 
-**Hard stop if fewer than 2 selected reviewers pass both parts** — print exactly
-what failed and how to fix it (install/authenticate the CLI; for a sandboxed host,
-re-run with network enabled; for a reviewer that wrote during the probe, tighten
-its read-only flag or drop it). No silent single-model degrade; the operator may
-explicitly opt into a single-model iterate-to-clean run, clearly labeled **NOT
-cross-model consensus**.
+**Hard stop if fewer than 2 selected reviewers pass both parts** (reachability
+*and* an enforcement-level read-only pass) — print exactly what failed and how to
+fix it (install/authenticate the CLI; for a sandboxed host, re-run with network
+enabled; for a reviewer that **wrote** or only **declined** the probe, give it a
+hard read-only sandbox or drop it — a decline is not certification). No silent
+single-model degrade; the operator may explicitly opt into a single-model
+iterate-to-clean run, clearly labeled **NOT cross-model consensus**.
 
 **Network gotcha (generalized):** when the host is a sandboxed Codex (or any
 network-disabled host), every reviewer CLI it spawns inherits the disabled
@@ -343,9 +352,13 @@ registrations. The README beta notice documents this so the intent is explicit.
   all). So plan mode is **not** a hard boundary headless: a model mistake or a
   prompt injection in the reviewed artifact could `exit_plan_mode` and gain
   write/shell. The "do not exit plan mode" contract is advisory, **not**
-  enforcement; the real gate is the preflight negative read-only probe (Step 0c),
-  which a writing reviewer fails. Not locally smoke-tested (not installed);
-  validated on first use. Same caution for any soft-read-only adapter.
+  enforcement. The Step 0c probe only certifies an adapter when a write is
+  *attempted and blocked at enforcement level*; a gemini that merely declines is
+  **inconclusive**, not certified. So for untrusted artifacts gemini must run under
+  a hard OS/sandbox layer or be marked **unsafe-for-untrusted-artifacts** (operator
+  opts in knowingly); for a trusted artifact the soft mode plus the contract is
+  acceptable. Not locally smoke-tested (not installed); validated on first use.
+  Same caution for any soft-read-only adapter.
 - **Heterogeneous read-only enforcement:** codex has a hard `-s read-only`
   sandbox; claude and grok use `--permission-mode plan` (a bare disallowed-edit
   list leaves `Bash` write-capable, so plan mode is the real control); gemini uses
