@@ -54,15 +54,15 @@ official docs via context7. Detection markers likewise.
 
 | Adapter | Reviewer invocation (read-only, structured) | Source |
 |---------|---------------------------------------------|--------|
-| `claude` | `claude -p --output-format json --disallowedTools "Edit Write NotebookEdit"` (or `--permission-mode plan`) | live `--help` |
+| `claude` | `claude -p --output-format json --permission-mode plan` (`plan` = read-only; a bare `--disallowedTools "Edit Write NotebookEdit"` still leaves `Bash` write-capable) | live `--help` |
 | `codex` | `codex exec -s read-only --skip-git-repo-check --output-schema <schema> -o <out> "<prompt>"` | live `--help` + context7 `/openai/codex` |
-| `gemini` | `gemini --output-format json -p "<prompt>"` — read-only via non-interactive mode (no `--yolo`) + the review-only contract; no hard read-only flag | context7 `/google-gemini/gemini-cli` |
-| `grok` | `grok -p --output-format json --permission-mode <read-only> "<prompt>"` | live `--help` |
+| `gemini` | `gemini --approval-mode plan --output-format json -p "<prompt>"` (`plan` = read-only, enforced by the built-in Tier-1 policy) | context7 + cloned `/google-gemini/gemini-cli` docs |
+| `grok` | `grok -p "<prompt>" --output-format json --permission-mode plan` (`plan` = read-only; no `read-only` value — enum is `default, acceptEdits, auto, dontAsk, bypassPermissions, plan`) | live `--help` |
 
 Codex sandbox modes are exactly `read-only | workspace-write | danger-full-access`.
 Gemini structured output: `--output-format json` (parse `.response`) or
-`stream-json` for streaming/liveness. Grok and Cursor-style CLIs expose
-`--output-format plain|json|stream-json`.
+`stream-json` for streaming/liveness. Grok exposes
+`--output-format plain|json|streaming-json` (note: `streaming-json`, not `stream-json`).
 
 **Host-detection markers (best-effort — see [Detection](#step-0a--detect-the-host-best-effort)):**
 
@@ -138,9 +138,9 @@ shipped `adapters.json`, then deep-merges (by `id`) an optional user override at
 `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/multi-llm-convergence/adapters.json` if
 present. Operators add/override adapters there so plugin updates don't clobber
 them. Built-ins: `claude`, `codex`, `gemini`, `grok` (`gemini` and `grok` carry a
-"validate on first use" note — neither was locally smoke-tested at design time,
-and `gemini` has no hard read-only flag, relying on non-interactive mode + the
-review-only contract).
+"validate on first use" note — neither was locally smoke-tested at design time).
+`gemini`'s read-only control is `--approval-mode plan` (a read-only mode enforced
+by the built-in Tier-1 policy), with the headless caveat in Risks below.
 
 ### Findings contract (unchanged in shape)
 
@@ -314,18 +314,21 @@ registrations. The README beta notice documents this so the intent is explicit.
 
 ## Risks & open items
 
-- **Gemini has no hard read-only flag** (the experimental `--approval-mode plan`
-  was dropped). Its read-only-ness rests on non-interactive `-p` mode (no
-  `--yolo`) plus the "review only, do not edit" contract — a reviewer only reads
-  files and emits JSON, and an edit attempt can't get approval in a
-  non-interactive default run. Not locally smoke-tested (not installed); the
-  preflight validates on first use. Same caution for any added adapter.
+- **Gemini read-only relies on `--approval-mode plan` + the contract.**
+  `--approval-mode plan` is a current, documented read-only mode whose built-in
+  Tier-1 policy enforces a read-only state. Headless caveat: in non-interactive
+  runs the policy auto-approves `enter_plan_mode`/`exit_plan_mode`, and *exiting*
+  plan mode switches to YOLO (auto-approve all) — so the "review only; do not
+  edit; do not exit plan mode" contract is the backstop against the model
+  auto-exiting. Not locally smoke-tested (not installed); the preflight validates
+  on first use. Same caution for any added adapter.
 - **Heterogeneous read-only enforcement:** codex has a hard `-s read-only`
-  sandbox; claude/grok rely on disallowed edit tools / permission mode; gemini
-  relies on non-interactive mode + the contract (no hard read-only flag). The
-  contract's "review only; do not edit" instruction is the backstop, and each
-  adapter recipe must specify the strongest read-only flag the CLI offers (none,
-  for gemini).
+  sandbox; claude and grok use `--permission-mode plan` (a bare disallowed-edit
+  list leaves `Bash` write-capable, so plan mode is the real control); gemini uses
+  `--approval-mode plan` (Tier-1 read-only policy, with the headless exit-plan-mode
+  caveat above). The contract's "review only; do not edit" instruction is the
+  backstop, and each adapter recipe must specify the strongest read-only flag the
+  CLI offers (`plan` / `--approval-mode plan` for claude/grok/gemini).
 - **Cost with ≥3 models** grows linearly per cycle; surfaced as a warning at
   selection, not a silent default.
 - **Same underlying model behind two ids** (e.g. two Claude-based wrappers)
