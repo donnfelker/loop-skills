@@ -126,8 +126,8 @@ Field contract:
 | `invoke` | **argv array** (no shell string). Placeholders `{prompt}`, `{schema_file}`, `{out_file}`, all substituted at dispatch: the multi-line review contract is injected as the single `{prompt}` element (no shell-escaping), and the orchestrator writes the findings-contract JSON Schema to a temp `{schema_file}` and picks a temp `{out_file}`. An adapter whose CLI has no schema flag simply omits those two placeholders. |
 | `stream_invoke_extra` | Extra argv appended for the streamed/liveness variant (e.g. `--json`, `--output-format stream-json`). |
 | `result` | Where the final structured text is read from: `out_file`, `stdout`, or a JSON path. Each JSON-output CLI has its own envelope key, so the path is per-adapter — claude `.result`, gemini `.response`. |
-| `smoke_test` | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the token ⇒ reachability pass). Preflight pairs it with a **negative read-only probe** on the chosen dispatch path — a write attempt that must be blocked at enforcement level (a model that merely *declines* is inconclusive, not a pass; native subagents are read-only by construction). Both must pass. |
-| `native_subagent` | Optional host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). Else null ⇒ use the CLI. |
+| `smoke_test` | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the token ⇒ reachability pass). Preflight pairs it with a **negative read-only probe** that targets a sentinel inside the artifact worktree and must be blocked at enforcement level (a model that merely *declines* is inconclusive, not a pass; a native subagent is exempt only when dispatched with an enforced read-only tool set). Both must pass. |
+| `native_subagent` | Optional host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). The host **must** dispatch it with an enforced read-only tool set (allowlist of read/search tools, not the default all-tools subagent); if it can't, use the CLI instead. Else null ⇒ use the CLI. |
 
 **Uniformity rule (extensibility backbone):** *every* adapter prompt-enforces
 the findings-JSON contract (below). A CLI's own `--output-schema` /
@@ -192,22 +192,31 @@ subagent need not have its CLI installed). Each smoke test has **two parts**:
 1. **Reachability:** a trivial prompt returns the OK token ⇒ installed,
    authenticated, and able to reach its API.
 2. **Read-only:** the reviewer must be *unable* to write — proven, not promised. A
-   native subagent is read-only **by construction** (the host grants it no
-   edit/write/shell tools). A CLI reviewer's read-only-ness rests on a *flag*, so it
-   gets a **negative probe**: it is told to write a sentinel to a scratch path and
-   report what happened, graded three ways:
+   native subagent is read-only only if the host **dispatches it with an enforced
+   read-only tool set** — an allowlist of read/search tools (or a read-only agent
+   type), *not* the default subagent, which may inherit `Edit`/`Write`/`Bash`. (The
+   original Claude `general-purpose` subagent carries all tools, so "by
+   construction" is the *enforced dispatch boundary*, never an assertion.) If the
+   host can't enforce a read-only native dispatch, route that reviewer through its
+   CLI and run the probe below instead. A CLI reviewer's read-only-ness rests on a
+   *flag*, so it gets a **negative probe**: the orchestrator drops a sentinel file
+   **inside the artifact's own worktree** (the exact surface the reviewer reads —
+   *not* an arbitrary temp path, because read-only policies are path-specific, e.g.
+   gemini plan mode *allows* writes under `.gemini/tmp/.../plans/*.md` while denying
+   others), tells the reviewer to modify that sentinel, and grades three ways:
    - **pass** — the write was *attempted* and *blocked at enforcement level* (a
-     sandbox/policy denial) **and** the scratch file is verified unchanged;
+     sandbox/policy denial) **and** the sentinel's checksum is verified unchanged;
    - **inconclusive** — the model *declined without attempting* ("I can't write in
      plan mode"). This does **not** count as read-only verified: a polite decline at
      preflight says nothing about what a prompt injection in the reviewed artifact
      could later induce. Treat as fail/abstain;
-   - **fail** — the scratch file was written.
+   - **fail** — the sentinel was modified.
 
-   Nothing short of an observed enforcement-level denial certifies the adapter —
-   `--help` only shows a flag *exists*, not that `Bash`/shell/edit are blocked, and
-   a soft-read-only adapter (e.g. gemini, whose headless policy auto-allows
-   `exit_plan_mode` → YOLO) can otherwise escape to write.
+   Nothing short of an observed enforcement-level denial *on the artifact surface*
+   certifies the adapter — `--help` only shows a flag *exists*, not that
+   `Bash`/shell/edit are blocked, and a soft-read-only adapter (e.g. gemini, whose
+   headless policy auto-allows `exit_plan_mode` → YOLO) can otherwise escape to
+   write.
 
 **Hard stop if fewer than 2 selected reviewers pass both parts** (reachability
 *and* an enforcement-level read-only pass) — print exactly what failed and how to
