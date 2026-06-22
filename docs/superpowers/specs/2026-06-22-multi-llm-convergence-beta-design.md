@@ -121,17 +121,18 @@ Field contract:
 | `family` | Model family for the "genuinely different model" guarantee. Defaults to `id`. |
 | `bin` | Binary checked with `command -v`. |
 | `detect_env` | Env vars that, if set, mark this adapter as the host. Empty = never auto-detected as host. |
-| `invoke` | **argv array** (no shell string). Placeholders: `{prompt}`, `{schema_file}`, `{out_file}`. The multi-line review contract is injected as the single `{prompt}` element — no shell-escaping. |
+| `invoke` | **argv array** (no shell string). Placeholders `{prompt}`, `{schema_file}`, `{out_file}`, all substituted at dispatch: the multi-line review contract is injected as the single `{prompt}` element (no shell-escaping), and the orchestrator writes the findings-contract JSON Schema to a temp `{schema_file}` and picks a temp `{out_file}`. An adapter whose CLI has no schema flag simply omits those two placeholders. |
 | `stream_invoke_extra` | Extra argv appended for the streamed/liveness variant (e.g. `--json`, `--output-format stream-json`). |
-| `result` | Where the final structured text is read from: `out_file`, `stdout`, or a JSON path like `.response`. |
+| `result` | Where the final structured text is read from: `out_file`, `stdout`, or a JSON path. Each JSON-output CLI has its own envelope key, so the path is per-adapter — claude `.result`, gemini `.response`. |
 | `smoke_test` | A cheap argv that proves installed + authed + network-reachable. Exit 0 and output contains the token ⇒ pass. |
 | `native_subagent` | Optional host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). Else null ⇒ use the CLI. |
 
 **Uniformity rule (extensibility backbone):** *every* adapter prompt-enforces
 the findings-JSON contract (below). A CLI's own `--output-schema` /
-`--output-format json` is a **bonus** parse path, never a requirement. Adding an
-LLM therefore needs only: a binary, a non-interactive read-only invocation, and
-the ability to return its final text.
+`--output-format json` is a **bonus** parse path, not required to add a new
+adapter (built-ins like `codex` include it because the orchestrator always has
+the findings schema to hand). Adding an LLM therefore needs only: a binary, a
+non-interactive read-only invocation, and the ability to return its final text.
 
 **Layered config (persistence across updates):** the orchestrator loads the
 shipped `adapters.json`, then deep-merges (by `id`) an optional user override at
