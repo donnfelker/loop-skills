@@ -49,8 +49,10 @@ Three changes drive the rewrite:
 
 ## Grounded facts (verified, not assumed)
 
-All flags below were confirmed from live `--help` on the dev machine and/or
-official docs via context7. Detection markers likewise.
+All flags below were confirmed to *exist* (names, enums) from live `--help` on the
+dev machine and/or official docs via context7; detection markers likewise. Flag
+existence is not proof of read-only *behavior* — that is verified per reviewer by
+the preflight negative probe (Step 0c), not assumed from `--help`.
 
 | Adapter | Reviewer invocation (read-only, structured) | Source |
 |---------|---------------------------------------------|--------|
@@ -124,7 +126,7 @@ Field contract:
 | `invoke` | **argv array** (no shell string). Placeholders `{prompt}`, `{schema_file}`, `{out_file}`, all substituted at dispatch: the multi-line review contract is injected as the single `{prompt}` element (no shell-escaping), and the orchestrator writes the findings-contract JSON Schema to a temp `{schema_file}` and picks a temp `{out_file}`. An adapter whose CLI has no schema flag simply omits those two placeholders. |
 | `stream_invoke_extra` | Extra argv appended for the streamed/liveness variant (e.g. `--json`, `--output-format stream-json`). |
 | `result` | Where the final structured text is read from: `out_file`, `stdout`, or a JSON path. Each JSON-output CLI has its own envelope key, so the path is per-adapter — claude `.result`, gemini `.response`. |
-| `smoke_test` | A cheap argv that proves installed + authed + network-reachable. Exit 0 and output contains the token ⇒ pass. |
+| `smoke_test` | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the token ⇒ reachability pass). Preflight pairs it with a **negative read-only probe** on the chosen dispatch path — a write attempt that must be refused (native subagents are read-only by construction). Both must pass. |
 | `native_subagent` | Optional host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). Else null ⇒ use the CLI. |
 
 **Uniformity rule (extensibility backbone):** *every* adapter prompt-enforces
@@ -182,17 +184,35 @@ skip requiring the host's own CLI.
 
 ### Step 0c — Preflight hard stop (both/all ends)
 
-Run each **selected** reviewer's `smoke_test` (a trivial prompt). A pass proves
-installed **and** authenticated **and** able to reach its API. **Hard stop if
-fewer than 2 selected reviewers pass** — print exactly what failed and how to fix
-it (install/authenticate the CLI; for a sandboxed host, re-run with network
-enabled). No silent single-model degrade; the operator may explicitly opt into a
-single-model iterate-to-clean run, clearly labeled **NOT cross-model consensus**.
+Smoke-test each **selected** reviewer along the **dispatch path it will actually
+use** — its CLI for a CLI reviewer, its `native_subagent` for a host-native one —
+not "its CLI" unconditionally (a host-family reviewer dispatched as a native
+subagent need not have its CLI installed). Each smoke test has **two parts**:
+
+1. **Reachability:** a trivial prompt returns the OK token ⇒ installed,
+   authenticated, and able to reach its API.
+2. **Read-only:** the reviewer must be unable to write. A native subagent is
+   read-only **by construction** — the host grants it no edit/write/shell tools. A
+   CLI reviewer's read-only-ness rests on a *flag*, so it gets a **negative probe**:
+   asked to modify a scratch file, the attempt must be refused. This is what
+   actually proves the read-only property the loop's correctness depends on —
+   `--help` only shows a flag *exists*, not that `Bash`/shell/edit are blocked, and
+   a soft-read-only adapter (e.g. gemini, whose headless policy auto-allows
+   `exit_plan_mode` → YOLO) can otherwise escape to write. A CLI reviewer that
+   writes during the probe **fails** and is not counted.
+
+**Hard stop if fewer than 2 selected reviewers pass both parts** — print exactly
+what failed and how to fix it (install/authenticate the CLI; for a sandboxed host,
+re-run with network enabled; for a reviewer that wrote during the probe, tighten
+its read-only flag or drop it). No silent single-model degrade; the operator may
+explicitly opt into a single-model iterate-to-clean run, clearly labeled **NOT
+cross-model consensus**.
 
 **Network gotcha (generalized):** when the host is a sandboxed Codex (or any
 network-disabled host), every reviewer CLI it spawns inherits the disabled
-network and fails to reach its API. The smoke test catches this deterministically
-and the hard-stop message tells the operator to run the host with network access.
+network and fails the reachability probe. The smoke test catches this
+deterministically and the hard-stop message tells the operator to run the host
+with network access.
 
 ### Step 1 — Ground truth
 
@@ -315,21 +335,24 @@ registrations. The README beta notice documents this so the intent is explicit.
 
 ## Risks & open items
 
-- **Gemini read-only relies on `--approval-mode plan` + the contract.**
-  `--approval-mode plan` is a current, documented read-only mode whose built-in
-  Tier-1 policy enforces a read-only state. Headless caveat: in non-interactive
-  runs the policy auto-approves `enter_plan_mode`/`exit_plan_mode`, and *exiting*
-  plan mode switches to YOLO (auto-approve all) — so the "review only; do not
-  edit; do not exit plan mode" contract is the backstop against the model
-  auto-exiting. Not locally smoke-tested (not installed); the preflight validates
-  on first use. Same caution for any added adapter.
+- **Gemini read-only is soft in headless mode.** `--approval-mode plan` is a
+  current, documented read-only mode whose built-in Tier-1 policy blocks writes to
+  anything but the plans directory — but in non-interactive runs that same policy
+  **auto-allows `exit_plan_mode`** (verified in `plan.toml`: `decision = "allow"`,
+  `interactive = false`), and exiting plan mode switches to YOLO (auto-approve
+  all). So plan mode is **not** a hard boundary headless: a model mistake or a
+  prompt injection in the reviewed artifact could `exit_plan_mode` and gain
+  write/shell. The "do not exit plan mode" contract is advisory, **not**
+  enforcement; the real gate is the preflight negative read-only probe (Step 0c),
+  which a writing reviewer fails. Not locally smoke-tested (not installed);
+  validated on first use. Same caution for any soft-read-only adapter.
 - **Heterogeneous read-only enforcement:** codex has a hard `-s read-only`
   sandbox; claude and grok use `--permission-mode plan` (a bare disallowed-edit
   list leaves `Bash` write-capable, so plan mode is the real control); gemini uses
-  `--approval-mode plan` (Tier-1 read-only policy, with the headless exit-plan-mode
-  caveat above). The contract's "review only; do not edit" instruction is the
-  backstop, and each adapter recipe must specify the strongest read-only flag the
-  CLI offers (`plan` / `--approval-mode plan` for claude/grok/gemini).
+  `--approval-mode plan` (soft headless — see above). `--help` confirms each flag
+  *exists* but not that it blocks writes, so each adapter recipe must specify the
+  strongest read-only flag the CLI offers **and** the preflight negative probe
+  (Step 0c) must confirm a write is actually refused before the reviewer counts.
 - **Cost with ≥3 models** grows linearly per cycle; surfaced as a warning at
   selection, not a silent default.
 - **Same underlying model behind two ids** (e.g. two Claude-based wrappers)
