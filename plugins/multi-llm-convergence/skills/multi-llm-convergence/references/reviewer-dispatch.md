@@ -52,12 +52,20 @@ Only the severity vocabulary (`critical | high | medium | low`) deliberately mat
 
 Use the free-form `codex-companion task` command. Do **not** use `review`/`adversarial-review` (they diff git and assume a code change — wrong for a plan/PRD/doc), and do **not** route through the `codex:codex-rescue` agent (it defaults to a write-capable run, only forwards to `task`, and exposes no `status`/`result` job-control for the watchdog).
 
-Resolve the companion script path, trying in order, first hit wins:
+Resolve the companion script path by searching the plugin roots — both **local/project** (`.claude/plugins` at or above `$PWD`) and **user-level** (`${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins`), nearest-first:
 
-1. `$CLAUDE_PLUGIN_ROOT/scripts/codex-companion.mjs` (if `CLAUDE_PLUGIN_ROOT` is set)
-2. `find "$HOME/.claude/plugins" -path '*/codex/scripts/codex-companion.mjs' -print -quit 2>/dev/null`
+```bash
+roots=(); p="$PWD"
+while :; do
+  [ -d "$p/.claude/plugins" ] && roots+=("$p/.claude/plugins")
+  [ "$p" = "/" ] && break; p="$(dirname "$p")"
+done
+roots+=("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins")
+existing=(); for r in "${roots[@]}"; do [ -d "$r" ] && existing+=("$r"); done
+[ ${#existing[@]} -gt 0 ] && find "${existing[@]}" -name 'codex-companion.mjs' -path '*codex*' -print -quit 2>/dev/null
+```
 
-If neither resolves, Codex is not installed → tell the user to install the Codex plugin from https://github.com/openai/codex-plugin-cc (then run `/codex:setup` to authenticate); see "Only one reviewer available" in SKILL.md edge cases.
+Do **not** use `$CLAUDE_PLUGIN_ROOT/scripts/codex-companion.mjs` — inside this skill `CLAUDE_PLUGIN_ROOT` resolves to the *multi-llm-convergence* plugin, not the codex plugin, so it points at the wrong place. The companion belongs to a separate plugin and must be located by search across the roots above. This is the same resolution the **Step 0 preflight** runs, so by the time you dispatch here it has already succeeded; cache the resolved path from Step 0 and reuse it. If it somehow fails now (e.g. the plugin was removed mid-loop), Codex is not installed → hard stop and tell the user to install the Codex plugin from https://github.com/openai/codex-plugin-cc (then run `/codex:setup` to authenticate); see Step 0 and the "Only one reviewer available" edge case in SKILL.md.
 
 **Primary (background + native job-control), so the watchdog can poll:**
 

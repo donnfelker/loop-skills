@@ -2,7 +2,7 @@
 name: multi-llm-convergence
 description: "Drive any artifact to convergence by alternating two genuinely different LLM reviewers — a Codex reviewer and an independent Claude review subagent — applying each round's findings and looping until BOTH independently agree it clears the bar (default: no critical/high findings). Artifact-agnostic: works on a plan, PRD, design doc, spec, or implementation diff. Use whenever the user says 'have two LLMs converge on this', 'loop Claude and Codex until they agree', 'review and revise until consensus', 'iterate this plan/PRD/spec until there are no blockers', or wants cross-model agreement rather than one reviewer's opinion. Prefer this over a single review pass whenever the user wants different models to actually agree on an end result. NOT pr-autopilot (one GitHub PR's comment threads) — this is the artifact-agnostic, alternating-different-models, iterate-to-consensus loop."
 metadata:
-  version: 0.1.0
+  version: 0.3.0
 ---
 
 # Multi-LLM Convergence
@@ -33,6 +33,7 @@ Before looping, get these settled (ask only for what the user didn't already giv
 ## Process flow
 
 ```
+0. Preflight         → verify BOTH reviewers are available; HARD STOP if Codex plugin is missing
 1. Ground truth      → clone/fetch external deps into gitignored tmp/ so offline reviewers don't stall
 2. Baseline          → ensure the artifact exists and is committed (round 0)
 3. Review (model A)  → dispatch reviewer, RUN THE LIVENESS WATCHDOG, collect findings
@@ -43,6 +44,35 @@ Before looping, get these settled (ask only for what the user didn't already giv
                        else loop to step 3, alternating models, until clean or cap/oscillation
 8. Final output      → converged artifact + round-by-round convergence log + explicit verdict
 ```
+
+## Step 0 — Preflight: confirm BOTH reviewers exist (HARD STOP)
+
+Do this **before any other work** — before grounding, before cloning, before the baseline commit. Cross-model convergence is impossible with one model, so there is no point cloning dependencies or committing a round 0 for a loop that can't run. Discovering a missing reviewer mid-loop (after you've already done grounding work) is the failure this step prevents.
+
+Check both reviewers:
+
+1. **Codex reviewer (the one that can be missing).** The codex plugin can be installed in more than one place — a **local/project** install under a `.claude/plugins` directory at or above the working directory, or a **user-level** install under the config dir (`$CLAUDE_CONFIG_DIR`, or `~/.claude` when that's unset). Search all of them, nearest-first, and take the first hit:
+
+   ```bash
+   # Resolve the codex companion across local + user plugin roots. Prints the path, or nothing if absent.
+   roots=(); p="$PWD"
+   while :; do
+     [ -d "$p/.claude/plugins" ] && roots+=("$p/.claude/plugins")   # local/project (walk up to root)
+     [ "$p" = "/" ] && break; p="$(dirname "$p")"
+   done
+   roots+=("${CLAUDE_CONFIG_DIR:-$HOME/.claude}/plugins")            # user-level (honors CLAUDE_CONFIG_DIR)
+   existing=(); for r in "${roots[@]}"; do [ -d "$r" ] && existing+=("$r"); done
+   [ ${#existing[@]} -gt 0 ] && find "${existing[@]}" -name 'codex-companion.mjs' -path '*codex*' -print -quit 2>/dev/null
+   ```
+
+   Do **not** use `$CLAUDE_PLUGIN_ROOT/scripts/codex-companion.mjs`: inside this skill `CLAUDE_PLUGIN_ROOT` points at the *multi-llm-convergence* plugin, not the codex plugin, so it would look in the wrong place. The companion lives in a *different* plugin, which is why it must be located by search across the roots above. If the search prints nothing, the Codex plugin is **not installed**.
+2. **Claude review subagent.** Confirm the host can dispatch a background subagent (`subagent_type: "general-purpose"`). In Claude Code this is always available; on another host, verify the equivalent capability exists.
+
+**HARD STOP rule:** if the Codex companion script does not resolve (or the subagent capability is unavailable), **stop immediately. Do not proceed to Step 1.** Do not clone dependencies, do not create a baseline commit, do not start a single-model loop. Tell the user exactly what's missing and how to fix it:
+
+> "I can't run multi-LLM convergence: the Codex plugin isn't installed, so I only have one model and cross-model consensus is impossible. Install it from https://github.com/openai/codex-plugin-cc, then run `/codex:setup` to authenticate, and re-run this skill."
+
+Only continue past this step once **both** reviewers resolve. If the user, after being told, explicitly asks for a single-model iterate-to-clean loop instead, you may run that — but only as an explicit opt-in, clearly labeled as **NOT cross-model consensus**. Never default into it silently.
 
 ## Step 1 — Establish ground truth FIRST
 
@@ -130,7 +160,7 @@ Keep the user-facing summary tight; the per-round commits and the log are the so
 
 ## Edge cases & failure modes
 
-- **Only one reviewer is available** (e.g. Codex plugin not installed). You cannot do cross-model convergence with one model. Tell the user, and offer either (a) install the Codex plugin from https://github.com/openai/codex-plugin-cc (then run `/codex:setup` to authenticate) and re-run, or (b) proceed as a single-model iterate-to-clean loop, clearly labeled as NOT cross-model consensus. Don't silently degrade.
+- **Only one reviewer is available** (e.g. Codex plugin not installed). This is caught up front by the **Step 0 preflight**, which hard-stops before any grounding or baseline work. You cannot do cross-model convergence with one model: tell the user to install the Codex plugin from https://github.com/openai/codex-plugin-cc (then run `/codex:setup` to authenticate) and re-run. Only if the user *then* explicitly asks may you run a single-model iterate-to-clean loop, clearly labeled as NOT cross-model consensus. Never silently degrade.
 - **Reviewer returns prose instead of the JSON contract.** Re-request once with the schema restated. If it still won't comply, parse conservatively and note the degraded parsing in the log — never invent a `clears_bar` verdict the reviewer didn't give.
 - **A finding can't be verified against any source** (no local clone, claim depends on runtime data). Treat it like an unsubstantiated claim: record it, don't auto-apply a risky change on its basis, and flag it for the user.
 - **Artifact has no external deps.** Skip cloning; still name the in-repo source-of-truth paths so reviewers verify against code, not memory.
@@ -138,6 +168,7 @@ Keep the user-facing summary tight; the per-round commits and the log are the so
 
 ## What NOT to do
 
+- **Don't skip the Step 0 preflight or soften its hard stop.** A missing Codex plugin means cross-model convergence is impossible — stop before any grounding/baseline work rather than discovering it mid-loop or quietly running one model.
 - **Don't use the same model for both reviewer slots.** Correlated blind spots = fake consensus. Different families is the entire mechanism.
 - **Don't end your turn with a reviewer in flight and no `ScheduleWakeup` armed.** That is *the* babysitting bug: you'd be waiting on a completion notification that a hung reviewer never sends. The self-armed wake fires on a clock regardless — arm it every dispatch, no exceptions.
 - **Don't passively await a background reviewer without the watchdog.** That's the exact way the loop hangs. Every dispatch gets supervised.
