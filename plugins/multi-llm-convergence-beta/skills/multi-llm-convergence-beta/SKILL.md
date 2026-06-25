@@ -73,7 +73,7 @@ Ask only for what the operator didn't already give you:
 6.  Final output      → converged artifact + per-round log + explicit verdict
 ```
 
-The registry, the dispatch recipes, the watchdog, and the read-only probe live in
+The registry, the dispatch recipes, the watchdog, and read-only handling live in
 `references/reviewer-dispatch.md`. The field schema and how to add a CLI live in
 `references/adding-an-adapter.md`. The behavioral rules that bind both driver and reviewers live in
 `references/coding-guidelines.md`.
@@ -106,48 +106,25 @@ reliable "running" marker.)
 ## Step 0c — Preflight hard stop (functional smoke test)
 
 Smoke-test each **selected** reviewer along the **dispatch path it will actually use** — its CLI for
-a CLI reviewer, its `native_subagent` for a host-native one — not "its CLI" unconditionally (a
-host-family reviewer dispatched as a native subagent need not have its CLI installed). Each smoke
-test has **two parts; both must pass**:
+a CLI reviewer, its `native_subagent` for a host-native one (a host-family reviewer dispatched as a
+native subagent need not have its CLI installed). Run the adapter's `smoke_test` argv (a trivial
+prompt): exit 0 with the OK token ⇒ installed, authenticated, and able to reach its API.
 
-1. **Reachability.** Run the adapter's `smoke_test` argv (a trivial prompt). Exit 0 and output
-   containing the OK token ⇒ installed, authenticated, and able to reach its API.
-2. **Read-only — proven, not promised.** The reviewer must be *unable* to write.
-   - A **native subagent** is read-only only if the host **dispatches it with an enforced read-only
-     tool set** — an allowlist of read/search tools (or a read-only agent type), *not* the default
-     subagent, which may inherit `Edit`/`Write`/`Bash`. (The Claude `general-purpose` subagent
-     carries all tools, so "read-only by construction" is the *enforced dispatch boundary*, never an
-     assertion.) If the host can't enforce a read-only native dispatch, route that reviewer through
-     its CLI and run the probe below instead.
-   - A **CLI reviewer's** read-only-ness rests on a *flag*, so it gets a **negative probe**: the
-     orchestrator drops a sentinel file **inside the artifact's own worktree** (the exact surface the
-     reviewer reads — *not* an arbitrary temp path, because read-only policies are path-specific:
-     e.g. gemini plan mode *allows* writes under `.gemini/tmp/.../plans/*.md` while denying others),
-     tells the reviewer to modify that sentinel, and grades three ways:
-     - **pass** — the write was *attempted* and *blocked at enforcement level* (a sandbox/policy
-       denial) **and** the sentinel's checksum is verified unchanged;
-     - **inconclusive** — the model *declined without attempting* ("I can't write in plan mode").
-       This does **not** count as read-only verified: a polite decline at preflight says nothing
-       about what a prompt injection in the reviewed artifact could later induce. Treat as
-       fail/abstain;
-     - **fail** — the sentinel was modified.
+**Read-only is best-effort — flag + contract.** Each adapter runs with the strongest read-only flag
+its CLI offers (codex `-s read-only` is a hard sandbox; claude/grok/gemini use `plan` mode, which is
+softer), and the review contract says "review only; do NOT edit." A reviewer only reads the artifact
+and emits JSON, so flag + contract is enough for the **trusted** artifacts this loop converges. (If
+you point it at untrusted code, run that reviewer under an OS sandbox — Docker or macOS Seatbelt — but
+that's not the default.)
 
-Nothing short of an observed enforcement-level denial *on the artifact surface* certifies an
-adapter. `--help` only proves a flag *exists*, not that `Bash`/shell/edit are blocked, and a
-soft-read-only adapter (e.g. gemini, whose headless policy auto-allows `exit_plan_mode` → YOLO) can
-otherwise escape to write.
-
-**Hard stop if fewer than 2 selected reviewers pass both parts** (reachability *and* an
-enforcement-level read-only pass). Print exactly what failed and how to fix it: install/authenticate
-the CLI; for a sandboxed host, re-run with network enabled; for a reviewer that **wrote** or only
-**declined** the probe, give it a hard read-only sandbox or drop it — a decline is not certification.
-**No silent single-model degrade.** The operator may explicitly opt into a single-model
-iterate-to-clean run, clearly labeled **NOT cross-model consensus**.
+**Hard stop if fewer than 2 selected reviewers pass** the smoke test. Print what failed and how to fix
+it: install/authenticate the CLI; for a sandboxed host, re-run with network enabled. **No silent
+single-model degrade.** The operator may explicitly opt into a single-model iterate-to-clean run,
+clearly labeled **NOT cross-model consensus**.
 
 > **Network gotcha:** when the host is a sandboxed Codex (or any network-disabled host), every
-> reviewer CLI it spawns inherits the disabled network and fails the reachability probe. The smoke
-> test catches this deterministically; the hard-stop message tells the operator to run the host with
-> network access.
+> reviewer CLI it spawns inherits the disabled network and fails the smoke test. The message tells the
+> operator to run the host with network access.
 
 ## Step 1 — Establish ground truth FIRST
 
@@ -179,13 +156,16 @@ For the **next reviewer in rotation** (never the model whose findings were just 
   (the findings JSON Schema the orchestrator writes to a temp file) and `{out_file}` (a temp output
   path). Append `stream_invoke_extra` for the streamed/liveness variant.
 - **Cross-family** ⇒ run the CLI in the background. **Same-family-as-host with a `native_subagent`**
-  ⇒ dispatch that instead (e.g. a Claude Task subagent) — but only with an enforced read-only tool
-  set (Step 0c); else use the CLI.
+  ⇒ dispatch that instead (e.g. a Claude Task subagent), ideally without edit tools; else use the CLI.
 - **Run reviewers one at a time.** Convergence is sequential by construction — model B must review
   what model A's round produced. Parallelizing defeats the point.
 - Read the structured findings via the adapter's `result` (`out_file` / `stdout` / a per-adapter JSON
   path — each JSON-output CLI has its own envelope key). Every adapter prompt-enforces the findings
   contract, so even when the envelope key is wrong the JSON can be extracted from the output text.
+- **A reviewer must return a usable verdict.** If you can't parse findings / `clears_bar` from its
+  output (prose, refusal, junk), re-request **once** with the contract restated. Still unparseable ⇒
+  log it **non-compliant** and treat the round as unresolved — it is **not** a clean pass. Never
+  assume a `clears_bar` the reviewer didn't give: silence is not approval.
 
 ### Step 3a — Liveness watchdog (REQUIRED on every dispatch)
 
@@ -239,6 +219,10 @@ Apply findings under `references/coding-guidelines.md` (think first, minimal, su
   original "two consecutive clean passes, one per model.")
 - **Stalled (cap):** hit the max-cycles cap without a full clean cycle ⇒ stop, emit the stall report
   naming open above-bar findings. Don't pretend consensus.
+- **Reviewer never reports:** a model that stays non-compliant after its re-request can't produce a
+  clean pass, so it blocks convergence — it is never rounded up to "yes." If it never reports within
+  the cap, end with `STALLED (reviewer unavailable)` (converged only against the others), never
+  `CONVERGED`. If dropping it would leave fewer than 2 reviewers, hard stop.
 - **Oscillation:** key findings by `location`; if the same `location`'s change direction flips
   **twice** across rounds, stop and surface the cross-model disagreement to the operator with each
   model's argument. A genuine cross-model disagreement is a human decision — don't average it away.
@@ -262,21 +246,12 @@ Keep the user-facing summary tight; the per-round commits and the log are the so
 
 ## Risks & cautions
 
-- **Gemini read-only is soft in headless mode.** `--approval-mode plan` is a documented read-only
-  mode whose Tier-1 policy blocks writes to anything but the plans directory — but in non-interactive
-  runs that policy **auto-allows `exit_plan_mode`** (`plan.toml`: `decision = "allow"`,
-  `interactive = false`), and exiting plan mode switches to YOLO. So plan mode is **not** a hard
-  boundary headless: a model mistake or a prompt injection in the reviewed artifact could
-  `exit_plan_mode` and gain write/shell. The "do not exit plan mode" contract is advisory, not
-  enforcement, and the Step 0c probe only certifies a write *attempted and blocked at enforcement
-  level* — a gemini that merely declines is **inconclusive**. For untrusted artifacts, gemini must
-  run under a hard OS/sandbox layer or be marked **unsafe-for-untrusted-artifacts** (operator opts in
-  knowingly). Same caution for any soft-read-only adapter.
-- **Heterogeneous read-only enforcement.** codex has a hard `-s read-only` sandbox; claude and grok
-  use `--permission-mode plan` (a bare disallowed-edit list leaves `Bash` write-capable, so plan mode
-  is the real control); gemini uses `--approval-mode plan` (soft headless). Each adapter recipe must
-  specify the strongest read-only flag the CLI offers **and** pass the Step 0c negative probe before
-  the reviewer counts.
+- **Read-only is best-effort (flag + contract), not a hard jail.** codex has a hard `-s read-only`
+  sandbox; claude/grok/gemini use their `plan` mode, which is softer (gemini's, for instance, still
+  permits writes to a plans dir and `web_fetch`). Reviewers only read and emit JSON and the contract
+  says "don't edit," which is enough for the trusted artifacts this loop converges. To review
+  **untrusted** code, run the reviewer under an OS sandbox (Docker, or macOS Seatbelt) — not the
+  default. (Each adapter recipe still uses the strongest read-only flag its CLI offers.)
 - **`gemini` and `grok` are validate-on-first-use** — neither was locally smoke-tested at design
   time (see the `note` fields in `adapters.json`).
 - **Cost with ≥3 models** grows linearly per cycle; surfaced as a warning at selection, not a silent
@@ -286,11 +261,11 @@ Keep the user-facing summary tight; the per-round commits and the log are the so
 
 ## What NOT to do
 
-- **Don't soften the Step 0c hard stop.** Fewer than 2 reviewers passing both parts means cross-model
-  convergence is impossible — stop before grounding/baseline rather than discovering it mid-loop or
-  quietly running one model.
-- **Don't certify a reviewer that only *declined* the read-only probe.** A decline is inconclusive,
-  not read-only verified.
+- **Don't soften the Step 0c hard stop.** Fewer than 2 reviewers passing the smoke test means
+  cross-model convergence is impossible — stop before grounding/baseline rather than discovering it
+  mid-loop or quietly running one model.
+- **Don't assume a verdict a reviewer didn't give.** Unparseable output ⇒ re-request once, then log it
+  non-compliant. Silence is not approval.
 - **Don't pick two adapters with the same `family`.** Correlated blind spots = fake consensus.
 - **Don't end your turn with a reviewer in flight and no `ScheduleWakeup` armed.** That's the
   babysitting bug; the self-armed wake fires on a clock regardless.

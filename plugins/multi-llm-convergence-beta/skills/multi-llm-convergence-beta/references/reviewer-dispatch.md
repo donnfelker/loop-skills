@@ -1,4 +1,4 @@
-# Reviewer dispatch — contract, per-adapter recipes, watchdog, read-only probe
+# Reviewer dispatch — contract, per-adapter recipes, watchdog, read-only
 
 Every reviewer gets the **same review contract** so their outputs are mechanically comparable. The
 only thing that differs is which CLI (or native subagent) runs it. Substitute every `<PLACEHOLDER>`
@@ -75,6 +75,12 @@ An adapter whose CLI has no schema flag simply omits those two placeholders. App
 - `{ "from": "stdout", "json_path": ".result" }` → parse stdout as JSON and read that key; if parsing
   fails, fall back to scanning the text (the contract is prompt-enforced).
 
+If no findings JSON can be extracted at all (prose, refusal, junk), that reviewer is **non-compliant**:
+re-request once with the contract restated; if it's still unparseable, log it non-compliant and treat
+the round as unresolved — **never synthesize a `clears_bar` it didn't give.** A model that stays
+non-compliant blocks convergence and, if it never reports, ends the run at `STALLED (reviewer
+unavailable)`.
+
 ## Per-adapter recipes (built-ins)
 
 The argv below come straight from `assets/adapters.json` (verified against live `--help` on the dev
@@ -106,7 +112,7 @@ still leaves `Bash` write-capable, so plan mode is the real boundary. (claude al
 `--json-schema <schema>`, which takes the schema *inline as a string*, not a file path; the built-in
 recipe relies on prompt-enforcement instead, so `{schema_file}` is intentionally omitted.)
 
-### gemini (`--approval-mode plan` — SOFT headless)
+### gemini (`--approval-mode plan`)
 
 ```
 gemini --approval-mode plan --output-format json -p "<prompt>"
@@ -114,10 +120,10 @@ gemini --approval-mode plan --output-format json -p "<prompt>"
 gemini --approval-mode plan --output-format stream-json -p "<prompt>"
 ```
 
-Result: parse stdout JSON, read `.response`. **Soft read-only headless:** `plan.toml` auto-allows
-`exit_plan_mode` (`decision=allow`, `interactive=false`) → YOLO, so plan mode is not a hard boundary.
-For untrusted artifacts, sandbox it hard or mark it unsafe-for-untrusted-artifacts (see SKILL.md
-Risks). The Step 0c probe certifies it only on an *attempted-and-blocked* write.
+Result: parse stdout JSON, read `.response`. `plan` is gemini's read-only mode; it's softer than
+codex's `-s read-only` sandbox (it still permits writes to a plans dir and `web_fetch`), so it leans
+on the review-only contract. Fine for trusted artifacts; for untrusted code run gemini under an OS
+sandbox (Docker or macOS Seatbelt). Not locally smoke-tested — validate on first use.
 
 ### grok (`--permission-mode plan`)
 
@@ -176,29 +182,14 @@ state and output growth — same stall logic, same wake discipline.
 > legitimately thinking for four minutes (alive, log trickling) is fine; a live process whose log
 > hasn't moved across two checks is stuck.
 
-## The Step 0c read-only negative probe (mechanics)
+## Read-only (best-effort: flag + contract)
 
-A CLI reviewer's read-only-ness rests on a flag, so prove it before the reviewer counts:
-
-1. **Drop a sentinel inside the artifact's own worktree** — the exact surface the reviewer reads —
-   *not* an arbitrary temp path. Read-only policies are path-specific (gemini plan mode *allows*
-   writes under `.gemini/tmp/.../plans/*.md` while denying others), so a temp-dir probe can pass while
-   the artifact surface is still writable. Record the sentinel's checksum.
-2. **Dispatch a one-shot prompt** through the adapter's real `invoke` path telling the reviewer to
-   modify that sentinel file.
-3. **Grade three ways:**
-   - **pass** — the write was *attempted* and *blocked at enforcement level* (a sandbox/policy denial)
-     **and** the sentinel's checksum is unchanged.
-   - **inconclusive** — the model *declined without attempting* ("I can't write in plan mode"). Treat
-     as fail/abstain: a polite decline says nothing about what a prompt injection in the reviewed
-     artifact could later induce.
-   - **fail** — the sentinel was modified.
-4. **Clean up** the sentinel afterward.
-
-For a **native subagent**, there is no flag to probe — it is read-only only when the host dispatches
-it with an **enforced read-only tool set** (an allowlist of read/search tools, or a read-only agent
-type), *not* the default all-tools subagent. If the host can't enforce that, route the reviewer
-through its CLI and run the probe above instead.
+A reviewer must not edit the artifact. Each adapter runs with the strongest read-only flag its CLI
+offers (codex `-s read-only` is a hard sandbox; claude/grok/gemini `plan` mode is softer), and the
+shared contract says "review only; do NOT edit." A reviewer only reads the artifact and emits JSON,
+so flag + contract is enough for the **trusted** artifacts this loop converges. For **untrusted**
+code, run the reviewer under an OS sandbox (Docker, or macOS Seatbelt). A native subagent should
+likewise be dispatched without edit tools.
 
 ## Why every reviewer gets the identical contract
 

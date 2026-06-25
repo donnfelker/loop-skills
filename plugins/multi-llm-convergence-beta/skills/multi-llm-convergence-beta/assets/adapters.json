@@ -33,7 +33,7 @@
       "result": { "from": "stdout", "json_path": ".response" },
       "smoke_test": ["--approval-mode", "plan", "-p", "Reply with the single token: OK"],
       "native_subagent": null,
-      "note": "VALIDATE ON FIRST USE — not locally smoke-tested at design time. `--approval-mode plan` is SOFT in headless mode: plan.toml auto-allows exit_plan_mode (decision=allow, interactive=false) -> YOLO, so plan mode is not a hard boundary headless. For untrusted artifacts, run under a hard OS sandbox or mark unsafe-for-untrusted-artifacts (operator opts in knowingly). See SKILL.md Risks and Step 0c."
+      "note": "VALIDATE ON FIRST USE — not locally smoke-tested at design time. `--approval-mode plan` is gemini's read-only mode; it is softer than codex's `-s read-only` sandbox (it still permits writes to a plans dir and web_fetch), so it leans on the review-only contract. Fine for trusted artifacts; for untrusted code run gemini under an OS sandbox (Docker or macOS Seatbelt). See SKILL.md Risks."
     },
     {
       "id": "grok",

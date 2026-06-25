@@ -37,13 +37,12 @@ gemini`, `N-model convergence`, `direct-CLI convergence`) so the two don't fire 
 
 ## Read-only safety
 
-Read-only enforcement is verified, not assumed. The preflight (Step 0c) runs a **negative probe**: it
-drops a sentinel inside the artifact's own worktree, asks the reviewer to modify it, and certifies the
-adapter only when the write is **attempted and blocked at enforcement level**. A reviewer that merely
-*declines* is **inconclusive** (not certified); one that *writes* fails. `gemini`'s `--approval-mode
-plan` is **soft headless** (it can `exit_plan_mode` → YOLO), so for untrusted artifacts gemini must
-run under a hard OS sandbox or be marked unsafe-for-untrusted-artifacts. `gemini` and `grok` are
-**validate-on-first-use** — neither was locally smoke-tested at design time.
+A reviewer must only read the artifact, never edit it. Each adapter runs with the strongest read-only
+flag its CLI offers (codex `-s read-only` is a hard sandbox; claude/grok/gemini use `plan` mode, which
+is softer), and the review contract says "review only; do not edit." That's enough for the **trusted**
+artifacts this loop converges. For **untrusted** code, run the reviewer under an OS sandbox (Docker, or
+macOS Seatbelt). `gemini` and `grok` are **validate-on-first-use** — neither was locally smoke-tested
+at design time.
 
 ## Layout
 

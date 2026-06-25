@@ -27,7 +27,7 @@ flag), put a record with the same `id` in the override — its fields win.
 | `invoke` | yes | **argv array** (no shell string). Placeholders `{prompt}`, `{schema_file}`, `{out_file}` are substituted at dispatch. `{prompt}` is the multi-line review contract injected as one argv element (no shell-escaping). Omit `{schema_file}`/`{out_file}` if the CLI has no schema/output-file flag. |
 | `stream_invoke_extra` | no | Extra argv appended for the streamed/liveness variant (e.g. `["--json"]`, `["--output-format", "stream-json"]`). For CLIs that *replace* the format token, the appended `--output-format` wins (last value). |
 | `result` | yes | Where the final structured text is read from: `{ "from": "out_file" }`, `{ "from": "stdout" }`, or `{ "from": "stdout", "json_path": ".key" }`. Each JSON-output CLI has its own envelope key, so the path is per-adapter. |
-| `smoke_test` | yes | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the OK token ⇒ reachability pass). Preflight (Step 0c) pairs it with the negative read-only probe; both must pass. |
+| `smoke_test` | yes | A cheap argv that proves installed + authed + network-reachable (exit 0 and output contains the OK token ⇒ reachability pass). This is the Step 0c preflight check. |
 | `native_subagent` | no (default `null`) | Host-native dispatch when this adapter is also the host (e.g. `"claude_task"`). The host **must** dispatch it with an enforced read-only tool set; if it can't, use the CLI. `null` ⇒ always use the CLI. |
 | `note` | no | Free-text caveat surfaced to the operator (e.g. "validate on first use", soft-read-only warnings). |
 
@@ -56,20 +56,17 @@ envelope `{ "answer": "…" }` to stdout, and has no schema flag. Drop this into
 ```
 
 It now appears in Step 0b selection (if `command -v acme` succeeds), gets the shared contract as
-`{prompt}`, and must pass the Step 0c reachability + read-only probe before it can review.
+`{prompt}`, and must pass the Step 0c reachability smoke test before it can review.
 
-## Read-only is the load-bearing requirement
+## Read-only
 
-The single thing every adapter must get right is **read-only enforcement**. `--help` proving a flag
-exists is *not* proof the flag blocks writes — Step 0c verifies that with a negative probe that drops
-a sentinel inside the artifact worktree and requires an enforcement-level denial (a model that merely
-declines is **inconclusive**, not certified). Pick the **strongest** read-only flag the CLI offers:
+A reviewer must not edit the artifact. Pick the **strongest** read-only flag the CLI offers and rely
+on it plus the review-only contract:
 
 - A **hard sandbox** (codex `-s read-only`) is best — writes are blocked by the OS/runtime.
 - A **plan/permission mode** (claude/grok `--permission-mode plan`, gemini `--approval-mode plan`) is
-  acceptable for trusted artifacts but may be **soft** (gemini headless auto-allows `exit_plan_mode`
-  → YOLO). For untrusted artifacts, wrap a soft adapter in a hard OS sandbox or mark it
-  **unsafe-for-untrusted-artifacts** and have the operator opt in knowingly.
+  softer but fine for the **trusted** artifacts this loop converges. For **untrusted** code, wrap the
+  reviewer in an OS sandbox (Docker, or macOS Seatbelt).
 - A bare disallowed-tools list is **not** sufficient on Claude-family CLIs — it can leave `Bash`
   write-capable. Use the plan/permission mode.
 
