@@ -8,7 +8,24 @@ All notable changes to the loop-skills marketplace are documented here. This pro
 | dev-team | 1.0.0 |
 | pr-autopilot | 1.0.0 |
 | triangulated-code-review | 1.3.0 |
-| multi-llm-convergence | 0.2.0 |
+| multi-llm-convergence | 0.3.0 |
+| multi-llm-convergence-beta | 0.1.0 |
+
+## 2026-06-23
+
+### Added — `multi-llm-convergence-beta` (new plugin, 0.1.0)
+
+A host-agnostic, configurable, **N-model** variant of `multi-llm-convergence`, shipped **in parallel** with the stable plugin (which stays untouched until promotion). Implements the approved design at `docs/superpowers/specs/2026-06-22-multi-llm-convergence-beta-design.md`. Three changes over the stable loop:
+
+- **Direct-CLI delegation** — reaches every model by shelling out to its own CLI (`codex exec`, `claude -p`, `gemini -p`, `grok -p`) instead of the Codex companion script. No plugin dependency.
+- **Configurable adapter registry** — `assets/adapters.json`, an argv-array invocation catalog with built-ins for `claude`, `codex`, `gemini`, `grok`; adding a CLI is a data edit (with a layered user override at `${CLAUDE_CONFIG_DIR:-$HOME/.claude}/multi-llm-convergence/adapters.json`).
+- **User-selected reviewer set** — the operator picks which models converge (≥2 distinct families); the host is a pure orchestrator and need not review.
+
+Keeps the original guarantees (local grounding, liveness watchdog, per-round commits) and adds a hard preflight that proves each reviewer is reachable **and** read-only via a negative probe (a decline is inconclusive; only an attempted-and-blocked write certifies). `gemini` and `grok` are validate-on-first-use.
+
+### Changed
+
+- **`multi-llm-convergence`** version row corrected from `0.2.0` to `0.3.0` to match the plugin manifest (the v0.3.0 Codex-plugin preflight hard stop shipped in commit `e710796`; the version table had not been updated). The plugin itself is unchanged.
 
 ## 2026-06-15
 

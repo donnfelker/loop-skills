@@ -1,0 +1,6 @@
+{
+  "name": "multi-llm-convergence-beta",
+  "description": "(beta/experimental) Direct-CLI, configurable, N-model variant of multi-llm-convergence. Drives any artifact (plan, PRD, design doc, spec, or implementation diff) to cross-model consensus by reaching each model through its own CLI (claude, codex, gemini, grok) instead of the Codex companion script, driven by a JSON adapter registry you extend with a data edit. The operator picks which models converge (≥2 distinct families); the host is a pure orchestrator and need not be a reviewer. Keeps the original loop's guarantees — local grounding, a liveness watchdog so a silent reviewer can't hang the loop, per-round commits, and a hard preflight stop when genuine cross-model consensus is impossible. Ships parallel to multi-llm-convergence (untouched) until promotion.",
+  "version": "0.1.0",
+  "license": "MIT"
+}
