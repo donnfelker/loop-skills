@@ -155,3 +155,77 @@ Each reviewer listens differently — trigger them the way they actually respond
 you must include it, or the mention resolves to a non-existent/ wrong account and the bot is never
 notified. The only exceptions are apps known to accept the bare handle (Claude → `@claude`). When in
 doubt, use the exact `login` you captured in §2.
+
+## 7. Inspect CI checks (tests, lint, formatting, security)
+
+PR feedback isn't only review comments — the **checks** that run on the PR (GitHub Actions jobs,
+status contexts, and third-party check runs like tests, linters, formatters, type-checkers, security
+scanners, code coverage, build gates) are feedback too. A red check is an actionable failure even when
+no human or bot left a comment about it.
+
+**List the checks and their state** for the PR (operates on the PR's current HEAD):
+
+```bash
+gh pr checks <number-or-url>
+```
+
+It prints one row per check with a status (`pass`, `fail`, `pending`/`in_progress`, `skipping`) plus
+the check name and a details URL. Exit code is non-zero when any check failed and `8` when checks are
+still pending — don't read a non-zero exit as a hard error; parse the rows. Add `--json
+name,state,bucket,link,workflow` for machine-readable output, or `--watch` to block until checks
+finish (prefer polling from the calling skill's loop over blocking).
+
+For the full detail behind a check run — annotations with file/line and the failure message — use the
+check-runs API against the HEAD sha:
+
+```bash
+gh api repos/{owner}/{repo}/commits/{headSha}/check-runs \
+  --jq '.check_runs[] | {name, status, conclusion, details_url, output: .output.summary}'
+```
+
+**Read the failure logs.** What you do next depends on the check type:
+
+- **GitHub Actions jobs** (most test/lint/format/typecheck/build/security-scan workflows): get the
+  failed run and dump only the failing steps' logs — far less noise than the full log:
+
+  ```bash
+  gh run list --branch <headRefName> --json databaseId,name,conclusion,headSha --limit 20
+  gh run view <run-id> --log-failed
+  ```
+
+  Match `headSha` to the PR's current HEAD so you're not reading a stale run. For one job, `gh run
+  view --job <job-id> --log-failed`.
+- **Check runs with annotations** (many linters/formatters/security tools surface file+line
+  annotations rather than logs): read `.output.summary` / `.output.text` from the check-runs API
+  above, and the annotations:
+
+  ```bash
+  gh api repos/{owner}/{repo}/check-runs/{check_run_id}/annotations \
+    --jq '.[] | {path, start_line, annotation_level, message}'
+  ```
+- **External status contexts** (CI systems posting commit statuses rather than check runs): the
+  `details_url` from `gh pr checks` is the only pointer; open it / fetch it for the failure detail.
+
+**Reproduce locally when you can.** Many failures (lint, format, type errors, unit tests) can be
+reproduced and fixed faster by running the same command locally than by round-tripping through CI.
+Identify the command from the workflow file (`.github/workflows/*.yml`) or the repo's scripts
+(`package.json`, `Makefile`, `pyproject.toml`, etc.) and run it — e.g. the formatter's `--write`/
+`--fix`, the linter, `npm test`. Re-running the project's own formatter/linter is often the entire
+fix for a red "format"/"lint" check.
+
+**Classify check failures** like §4 classifies comments:
+
+- **Actionable — fix these:** test failures, lint/format violations, type errors, failed security
+  scans flagging your changes, build/compile breaks. These are concrete and almost always your
+  change's responsibility.
+- **Not your job / report-don't-fix:** a check that is failing on the base branch too (pre-existing,
+  not introduced by this PR), an infrastructure/flake failure (runner died, network timeout, transient
+  rate-limit), or a required external approval/deploy gate the PR author can't satisfy from code.
+  Distinguish "my change broke this" from "this was already red" before sinking time into a fix —
+  compare against the base branch or the check's history when unsure.
+
+**There is nothing to "reply to" or "resolve" on a check** — checks have no comment threads. You
+address a failing check purely by pushing a commit that makes it pass; CI re-runs automatically on the
+new HEAD (no re-request ping needed — that mechanism in §6 is for review bots only). If a check needs a
+manual re-run after a fix that wasn't a code push (rare — e.g. a flake), `gh run rerun <run-id>
+--failed` re-runs just the failed jobs.
