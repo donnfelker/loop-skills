@@ -1,22 +1,22 @@
 ---
 name: pr-autopilot
-description: "Autonomously watch a single pull request and drive its review feedback to completion without supervision: each round fetch every unaddressed review and comment (Claude, CodeRabbit, Copilot, other bots, humans), address the actionable ones, commit, push, reply/resolve threads, and re-request review from the bots whose change requests it addressed, then loop until a quiet round or a safety cap and print a summary. Use whenever the user wants to 'watch a PR', 'babysit a PR', 'keep addressing PR comments until they are done', 'auto-respond to reviews', 'handle the review back-and-forth on PR #N', or run a hands-off review-response loop on ONE PR — even if they don't name this skill. Pass --single-pass (or --max-rounds 1) for a single autonomous round with no loop, a one-shot comment sweep. For driving MANY stacked PRs from a parent ticket, see /implement-full-spec."
+description: "Autonomously watch a single pull request and drive its review feedback AND failing CI checks to completion without supervision: each round fetch every unaddressed review and comment (Claude, CodeRabbit, Copilot, other bots, humans) plus the PR's check runs (test failures, lint, formatting, type, build, and security checks), address the actionable ones, commit, push, reply/resolve threads, and re-request review from the bots whose change requests it addressed, then loop until a quiet round or a safety cap and print a summary. Use whenever the user wants to 'watch a PR', 'babysit a PR', 'keep addressing PR comments until they are done', 'fix the failing checks on a PR', 'get CI green', 'auto-respond to reviews', 'handle the review back-and-forth on PR #N', or run a hands-off review-response loop on ONE PR — even if they don't name this skill. Pass --single-pass (or --max-rounds 1) for a single autonomous round with no loop, a one-shot comment-and-checks sweep. For driving MANY stacked PRs from a parent ticket, see /implement-full-spec."
 user_invocable: true
 ---
 
 # PR Autopilot
 
-Drive a single pull request's review feedback to completion without supervision. It runs round after
-round on its own — committing, pushing, re-requesting review, and waiting for the next batch of
-feedback — until the reviews settle down. For a one-shot sweep instead of a loop, run it with
-`--single-pass`: a single autonomous round, then stop.
+Drive a single pull request's review feedback **and its failing CI checks** to completion without
+supervision. It runs round after round on its own — committing, pushing, re-requesting review, and
+waiting for the next batch of feedback — until both the reviews *and* the checks settle down. For a
+one-shot sweep instead of a loop, run it with `--single-pass`: a single autonomous round, then stop.
 
 **Read `${CLAUDE_PLUGIN_ROOT}/references/pr-review-mechanics.md` first** (if that path doesn't
 resolve, it's at the plugin root, two levels up from this skill:
 `../../references/pr-review-mechanics.md`). That file is the shared "how to talk to the GitHub review
 API correctly" layer — fetching all three comment sources, classifying, replying, resolving threads,
-and the per-bot re-review trigger table. The steps below are this skill's *control flow*: when to
-loop, when to commit, and when to stop.
+the per-bot re-review trigger table, and (**§7**) inspecting CI check runs and reading their failure
+logs. The steps below are this skill's *control flow*: when to loop, when to commit, and when to stop.
 
 ## Operating mode (read this first)
 
@@ -64,30 +64,62 @@ Then apply **§4 (classify)**. For ambiguous comments you don't have a user to a
 call and note it in the final report rather than blocking. Tag each actionable item with its reviewer
 and whether it's a **change request / recommendation to implement** — you need that in Step 4.
 
+### Also fetch the CI checks
+
+Apply **§7 (inspect CI checks)**: run `gh pr checks` for the PR and capture every check's state
+(pass / fail / pending). Treat each **failing** check (test failures, lint, formatting, type, build,
+security scans) as an actionable item for this round, exactly like an actionable review comment —
+except a check has no thread to reply to or resolve; you address it purely by pushing a fix that turns
+it green. For each failing check, read its failure detail (failed-step logs or annotations, per §7) so
+you know what to fix, and classify per §7: **actionable** failures your change caused vs. **pre-existing
+/ flaky / infra** failures you report rather than chase. A check still **pending / in progress** is not
+a failure — it's a pending signal for Step 2 (don't conclude until it finishes).
+
 ### Human reviewers
 
 Address actionable human comments the same as bots — fix, commit, reply, and re-request their review
 (§6). **But do not let the loop wait on humans.** People respond on their own schedule, so the loop's
-continue/stop decision (Step 2) is based only on bot activity — you never spin indefinitely waiting
-for a person. Surface outstanding human items in the final report instead.
+continue/stop decision (Step 2) is based only on bot activity and CI checks — you never spin
+indefinitely waiting for a person. Surface outstanding human items in the final report instead.
 
 ## Step 2 — Decide: is this a quiet round?
 
-If there are **no new actionable comments** and **no outstanding `CHANGES_REQUESTED` review from any
-bot**, this is a **quiet round** → go to Step 5 (finish and report). Otherwise continue.
+A round is **quiet** only when **all** of these hold:
 
-One more condition before calling it quiet: **each bot's most recent verdict must target the current
-HEAD commit, and no review run may still be in flight.** "No new comments at poll time" is not the
-same as "the bot has signed off on this HEAD" — review bots take a couple of minutes after a push or
-re-ping, and a new finding can land seconds after your poll. If you just pushed or just re-pinged a
-bot, treat its review as pending and poll again rather than concluding on a verdict for an older
-commit. When a bot's review runs as a CI job (e.g. a `claude-review` workflow), an in-progress check
-run on the PR is a reliable pending signal.
+- **no new actionable comments**, and
+- **no outstanding `CHANGES_REQUESTED` review from any bot**, and
+- **no failing CI checks** that are this PR's responsibility (actionable per §7).
+
+If all hold → go to Step 6 (finish and report). Otherwise continue. A failing actionable check on its
+own keeps the round non-quiet even when every comment is resolved — getting CI green is part of the
+job.
+
+Two more conditions before calling it quiet:
+
+- **Each bot's most recent verdict must target the current HEAD commit, and no review run may still be
+  in flight.** "No new comments at poll time" is not the same as "the bot has signed off on this HEAD"
+  — review bots take a couple of minutes after a push or re-ping, and a new finding can land seconds
+  after your poll. If you just pushed or just re-pinged a bot, treat its review as pending and poll
+  again rather than concluding on a verdict for an older commit. When a bot's review runs as a CI job
+  (e.g. a `claude-review` workflow), an in-progress check run on the PR is a reliable pending signal.
+- **No CI check may still be pending / in progress.** A check that hasn't finished yet is not a pass —
+  if you just pushed, CI is re-running, so poll again rather than declaring the round quiet on a check
+  that hasn't reported. Only conclude once every check has settled to pass or a non-actionable
+  failure.
 
 ## Step 3 — Address, commit, push
 
 Make the changes (read context, fix, group items touching the same file, run the project's
-linter/formatter if it has one). No approval gate — just do it carefully.
+linter/formatter if it has one). No approval gate — just do it carefully. This covers **both** the
+actionable review comments **and** the actionable failing checks from Step 1:
+
+- For **review comments**, fix as described by the reviewer.
+- For **failing checks**, fix the underlying cause — make the failing tests pass, clear the lint/type
+  errors, run the formatter's `--fix`/`--write`, resolve what the security scan flagged. Reproduce the
+  failure locally where you can (§7) and re-run that same command to confirm it's green *before* you
+  commit, so you're not burning rounds waiting on CI to tell you what a local run would have. Don't
+  paper over a failure (e.g. don't delete or skip a test) just to turn it green — if you genuinely
+  can't fix a check, leave it and report it in Step 6.
 
 Then commit and push:
 
@@ -106,14 +138,21 @@ this round, and use each bot's correct trigger (`@claude`, `@coderabbitai review
 exact `[bot]` mention for others). Combine the "Addressed" reply and the re-review ping into one
 comment when you can.
 
+**Checks need none of this.** A CI check has no comment thread to reply to or resolve and no bot to
+re-ping — pushing the fix is the whole interaction, and CI re-runs itself automatically on the new
+HEAD. The only exception is a check that needs a manual re-run after a non-code fix (a flake): `gh run
+rerun <run-id> --failed`, per §7.
+
 ## Step 5 — Wait for the next batch, then loop
 
 **If running `--single-pass` (`--max-rounds 1`): skip this step entirely.** The single round is done —
 go straight to Step 6 and report, without scheduling a wake-up or waiting for the next batch.
 
 After pushing and pinging, bots take time to come back (CodeRabbit and Claude usually within a few
-minutes; Copilot similar). Keep watching across that gap using the **`/loop` self-pacing mechanism** —
-schedule a wake-up to re-enter Step 1 rather than blocking:
+minutes; Copilot similar), and **CI checks need time to re-run on the new HEAD** — a fresh push
+re-triggers the workflows, and a test/build matrix can take several minutes to report. Keep watching
+across that gap using the **`/loop` self-pacing mechanism** — schedule a wake-up to re-enter Step 1
+rather than blocking:
 
 - If the user launched you under `/loop <interval> ...`, complete one round per invocation and let
   `/loop` re-fire you — return to Step 1 on the next firing.
@@ -122,7 +161,7 @@ schedule a wake-up to re-enter Step 1 rather than blocking:
   minutes) so you're not hammering the API. The wake-up re-enters this skill at Step 1 for the same
   PR.
 
-Each re-entry, increment the round counter and re-check the caps. **Stop immediately and go to Step 5
+Each re-entry, increment the round counter and re-check the caps. **Stop immediately and go to Step 6
 [finish]** if `--max-rounds` is exceeded or `--time-cap` elapses, even mid-wait.
 
 ## Step 6 — Finish and print results
@@ -132,13 +171,14 @@ Stop the loop and print a clear summary. Lead with **why** you stopped (quiet ro
 ```
 ## PR #123 review watch — complete
 
-Stopped: quiet round (no new actionable comments, no outstanding change requests)
+Stopped: quiet round (no new actionable comments, no change requests, all checks green)
 Rounds run: 3 of 6 max · elapsed 14 min
 
 ### Addressed this session
 - coderabbitai[bot]: 4 comments → fixed in a1b2c3d, e4f5g6h (re-reviewed, now passing)
 - claude[bot]: 2 comments → fixed in a1b2c3d (re-review requested, approved)
 - @jsmith: 1 comment → fixed in e4f5g6h (re-review requested — awaiting human response)
+- CI: `unit-tests` and `lint` were failing → fixed in a1b2c3d (both now passing)
 
 ### Still outstanding
 - @jsmith: 1 question ("why this approach?") — left for you, not a change request
@@ -147,11 +187,17 @@ Rounds run: 3 of 6 max · elapsed 14 min
 - claude[bot]: APPROVED  ·  coderabbitai[bot]: no outstanding comments
 - copilot: re-review pending  ·  human reviewers: 1 pending (jsmith)
 
+### Current check state
+- unit-tests: pass · lint: pass · typecheck: pass · security-scan: pass
+- coverage: FAILING — pre-existing on base branch, not introduced by this PR (left as-is)
+
 PR: https://github.com/owner/repo/pull/123
 ```
 
-If you stopped on a cap, say so plainly and list what's still unaddressed so the user can decide
-whether to re-run the watch or step in.
+Always include the **check state** section so the user can see CI is green (or exactly which checks
+aren't, and why you left them). If you stopped on a cap, say so plainly and list what's still
+unaddressed — outstanding comments **and** still-red checks — so the user can decide whether to re-run
+the watch or step in.
 
 ## Guardrails
 
@@ -159,6 +205,11 @@ whether to re-run the watch or step in.
   base/default branch.
 - **No false resolutions:** only reply "Addressed in `<hash>`" / resolve a thread for a change you
   actually made and pushed. If you chose not to act on a comment, leave it open and report it.
+- **No gaming a green check:** make a failing check pass by fixing the real cause, never by deleting,
+  skipping, or weakening the test/lint/security rule that's catching the problem (don't add ignore
+  directives, lower thresholds, or `continue-on-error` just to turn it green). If a check is failing
+  for a reason you can't fix — pre-existing on the base branch, a flake, or an external gate — leave it
+  and report it honestly rather than disabling it.
 - **Termination is guaranteed by design:** the quiet-round check plus the round/time caps are what
   stop the loop. If you can't make progress on an item (a comment you don't understand, a fix that
   breaks tests you can't repair), stop, report it, and let the user decide rather than churning.
