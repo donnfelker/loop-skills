@@ -6,7 +6,7 @@ All notable changes to the loop-skills marketplace are documented here. This pro
 |--------|---------|
 | spec-development | 1.0.0 |
 | dev-team | 1.0.0 |
-| pr-autopilot | 1.0.0 |
+| pr-autopilot | 1.1.0 |
 | triangulated-code-review | 1.3.0 |
 | multi-llm-convergence | 0.3.0 |
 | multi-llm-convergence-beta | 0.1.1 |
@@ -34,6 +34,15 @@ host-agnostic, N-model goal.
 - Kept the host-agnostic launch goal: the driver may run from Claude, Codex, Gemini, or another
   capable host, but at least two distinct built-in reviewer families must pass hard preflight before
   the loop starts.
+
+## 2026-06-30
+
+### Changed — `pr-autopilot` (1.1.0)
+
+Version bump capturing the changes shipped since 1.0.0:
+
+- **CI checks to green** — each round now also drives failing CI checks back to green, not just review comments (`feat(pr-autopilot): also drive failing CI checks to green`).
+- **Trust-boundary guidance** — documented the untrusted-input and command-execution trust boundary in the review mechanics so PR content is treated as data, not instructions.
 
 ## 2026-06-23
 
