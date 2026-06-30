@@ -92,5 +92,6 @@ When authoring or editing any content under `plugins/`, never include specifics 
 - [ ] `SKILL.md` is under 500 lines
 - [ ] Cross-plugin references use skill names, not relative paths; any new dependency is preflight-checked and documented
 - [ ] No sensitive data, credentials, or source-specific details
+- [ ] Plugin `version` bumped in `plugin.json` (SemVer) whenever a skill or plugin is edited
 - [ ] `README.md` Available Plugins table updated (`<!-- PLUGINS:START -->` / `<!-- PLUGINS:END -->`)
 - [ ] `CHANGELOG.md` updated with a dated entry
