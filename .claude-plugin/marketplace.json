@@ -37,7 +37,7 @@
     {
       "name": "multi-llm-convergence-beta",
       "source": "./plugins/multi-llm-convergence-beta",
-      "description": "(beta/experimental) Direct-CLI, configurable, N-model variant of multi-llm-convergence. Reaches every model through its own CLI (claude, codex, gemini, grok) instead of the Codex companion script, driven by a JSON adapter registry you extend with a data edit. The operator picks which models converge (≥2 distinct families) and the host is a pure orchestrator. Keeps the original's guarantees — local grounding, a liveness watchdog, per-round commits, and a hard preflight stop (reachable + read-only proven by a negative probe) when cross-model consensus is impossible. Ships parallel to multi-llm-convergence (untouched) until promotion."
+      "description": "(beta/experimental) Host-agnostic, N-model variant of multi-llm-convergence. Runs from Claude, Codex, Gemini, or another capable host and rotates multiple built-in reviewer families through one uniform read-only reviewer protocol. Keeps the original's guarantees: local-only grounding, liveness supervision, per-round commits, hard preflight for each selected family, and a full clean-cycle convergence rule. No user-provided command adapters. Ships parallel to multi-llm-convergence (untouched) until promotion."
     }
   ]
 }
