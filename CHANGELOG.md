@@ -9,7 +9,31 @@ All notable changes to the loop-skills marketplace are documented here. This pro
 | pr-autopilot | 1.0.0 |
 | triangulated-code-review | 1.3.0 |
 | multi-llm-convergence | 0.3.0 |
-| multi-llm-convergence-beta | 0.1.0 |
+| multi-llm-convergence-beta | 0.1.1 |
+
+## 2026-06-30
+
+### Changed - `multi-llm-convergence-beta` (0.1.1)
+
+Aligned the beta skill's security posture with `multi-llm-convergence`, treating the stable skill as
+the source of truth for trust boundaries and convergence semantics while preserving the beta's
+host-agnostic, N-model goal.
+
+- Replaced the user-extensible adapter registry with static built-in reviewer profiles.
+- Kept multiple model families (`claude`, `codex`, `gemini`, `grok`) but requires every selected
+  family to use the same preflight, review-only mode, prompt contract, liveness checks, output
+  parsing, apply/commit flow, and full clean-cycle convergence rule.
+- Removed the shipped adapter JSON catalog and adapter-authoring reference.
+- Documented the maintainer-only path for adding future built-in reviewer families without restoring
+  runtime/user-provided command adapters.
+- Tightened beta/stable process equivalence after verifier review: reviewer prompts now include the
+  stable general-rule criteria, liveness requires a host wake/poll or explicit timeout, baseline
+  wording requires a committed artifact state, and oscillation detection keys by `location`.
+- Changed grounding to local-only source paths; the beta no longer instructs agents to fetch, clone,
+  install, or update external source material during the skill run.
+- Kept the host-agnostic launch goal: the driver may run from Claude, Codex, Gemini, or another
+  capable host, but at least two distinct built-in reviewer families must pass hard preflight before
+  the loop starts.
 
 ## 2026-06-23
 
