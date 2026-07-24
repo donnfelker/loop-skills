@@ -205,6 +205,12 @@ rather than blocking:
   minutes) so you're not hammering the API. The wake-up re-enters this skill at Step 1 for the same
   PR.
 
+One exception to the minutes-scale wait: mergeability. After you push (especially a merge commit),
+GitHub recomputes `mergeable` in **seconds**, not minutes — so re-poll §8 right away, within the same
+round, to confirm the PR reports `MERGEABLE` before settling in to wait on bots and CI. If it comes
+back `CONFLICTING` again (the base branch moved mid-round), that's a new actionable item for the next
+round — handle it at the next Step 1, don't block the wait on it.
+
 Each re-entry, increment the round counter and re-check the caps. **Stop immediately and go to Step 6
 [finish]** if `--max-rounds` is exceeded or `--time-cap` elapses, even mid-wait.
 

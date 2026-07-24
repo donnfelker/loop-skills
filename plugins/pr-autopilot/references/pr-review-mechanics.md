@@ -257,8 +257,9 @@ gh pr view <number-or-url> --json mergeable,mergeStateStatus,baseRefName
 
 - `mergeable` is one of `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`. **`UNKNOWN` is not an answer** —
   GitHub computes mergeability lazily and reports `UNKNOWN` while the computation runs (common right
-  after a push to the PR or to the base branch, and on the first query after a while). Re-poll after a
-  few seconds until it settles to `MERGEABLE` or `CONFLICTING`; never read `UNKNOWN` as either.
+  after a push to the PR or to the base branch, and on the first query after a while). Re-poll every
+  ~5 seconds — it typically settles well under a minute — until it reports `MERGEABLE` or
+  `CONFLICTING`; never read `UNKNOWN` as either.
 - `mergeStateStatus` adds detail: `DIRTY` = merge conflicts; `BEHIND` = head is behind base but merges
   cleanly; `BLOCKED` = waiting on required reviews/checks; `UNSTABLE` = mergeable with a non-required
   check failing; `CLEAN` = ready.
