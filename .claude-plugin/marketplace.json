@@ -22,7 +22,7 @@
     {
       "name": "pr-autopilot",
       "source": "./plugins/pr-autopilot",
-      "description": "Autonomously watch a single pull request and drive its review feedback to completion — each round fetch unaddressed reviews and comments from bots and humans, address the actionable ones, commit, push, reply/resolve threads, and re-request review, looping until a quiet round or a safety cap. Includes a --single-pass mode (one autonomous round, no loop). Owns the shared pr-review-mechanics reference."
+      "description": "Autonomously watch a single pull request and drive its review feedback, failing CI checks, and merge conflicts to completion — each round fetch unaddressed reviews and comments from bots and humans, the PR's check runs, and its mergeability; address the actionable ones (resolving conflicts by merging the base branch into the head), commit, push, reply/resolve threads, and re-request review, looping until a quiet round or a safety cap. Includes a --single-pass mode (one autonomous round, no loop). Owns the shared pr-review-mechanics reference."
     },
     {
       "name": "triangulated-code-review",

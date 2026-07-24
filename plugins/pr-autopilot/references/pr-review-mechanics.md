@@ -244,3 +244,42 @@ address a failing check purely by pushing a commit that makes it pass; CI re-run
 new HEAD (no re-request ping needed — that mechanism in §6 is for review bots only). If a check needs a
 manual re-run after a fix that wasn't a code push (rare — e.g. a flake), `gh run rerun <run-id>
 --failed` re-runs just the failed jobs.
+
+## 8. Check mergeability (merge conflicts)
+
+Mergeability is a **third feedback channel**, separate from comments (§2) and checks (§7). A PR can be
+conflict-blocked with zero unaddressed comments and every check green — none of the earlier fetches
+will surface it. Fetch it explicitly:
+
+```bash
+gh pr view <number-or-url> --json mergeable,mergeStateStatus,baseRefName
+```
+
+- `mergeable` is one of `MERGEABLE`, `CONFLICTING`, or `UNKNOWN`. **`UNKNOWN` is not an answer** —
+  GitHub computes mergeability lazily and reports `UNKNOWN` while the computation runs (common right
+  after a push to the PR or to the base branch, and on the first query after a while). Re-poll every
+  ~5 seconds — it typically settles well under a minute — until it reports `MERGEABLE` or
+  `CONFLICTING`; never read `UNKNOWN` as either.
+- `mergeStateStatus` adds detail: `DIRTY` = merge conflicts; `BEHIND` = head is behind base but merges
+  cleanly; `BLOCKED` = waiting on required reviews/checks; `UNSTABLE` = mergeable with a non-required
+  check failing; `CLEAN` = ready.
+
+**Resolve a conflict by merging the base branch into the head branch.** Rebasing a published PR branch
+rewrites its history and therefore requires a force-push — and it orphans the commit SHAs that review
+threads and "Addressed in `<hash>`" replies point at. Whether force-pushing is ever allowed is the
+calling skill's policy (pr-autopilot forbids it); the merge-commit route needs no history rewrite:
+
+```bash
+git fetch origin <baseRefName>
+git merge origin/<baseRefName>     # conflicts stop the merge; `git status` lists conflicted files
+# edit each conflicted file: remove the <<<<<<< ======= >>>>>>> markers, keeping BOTH sides' intent
+git add <resolved files...>        # stage each file by name once resolved
+git commit                         # completes the merge; git supplies a standard merge message
+```
+
+Then push to the head branch. GitHub recomputes mergeability and re-runs CI on the new HEAD. If the
+merge goes badly mid-resolution, `git merge --abort` returns the tree to its pre-merge state.
+
+**There is nothing to "reply to" or "resolve" on a conflict** — like checks, mergeability has no
+comment thread; the pushed merge commit is the entire fix. Afterward re-poll `mergeable` until it
+reports `MERGEABLE` (expect a brief `UNKNOWN` while GitHub recomputes).
