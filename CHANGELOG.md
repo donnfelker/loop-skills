@@ -6,10 +6,34 @@ All notable changes to the loop-skills marketplace are documented here. This pro
 |--------|---------|
 | spec-development | 1.0.0 |
 | dev-team | 1.0.0 |
-| pr-autopilot | 1.1.0 |
+| pr-autopilot | 1.2.0 |
 | triangulated-code-review | 1.3.0 |
 | multi-llm-convergence | 0.3.0 |
 | multi-llm-convergence-beta | 0.1.1 |
+
+## 2026-07-24
+
+### Changed — `pr-autopilot` (1.2.0)
+
+Added **merge-conflict detection and resolution** as a third feedback channel alongside review
+comments and CI checks. Previously a conflicted PR with no new comments and green checks was declared
+a quiet round and the loop stopped without ever noticing the conflict.
+
+- New **§8 (check mergeability)** in `pr-review-mechanics.md`: fetch `mergeable` /
+  `mergeStateStatus` via `gh pr view`, treat `UNKNOWN` as a pending signal to re-poll (GitHub computes
+  mergeability lazily), and resolve conflicts by merging the base branch into the head branch — never
+  by rebasing, which would require a force-push and orphan the SHAs review threads point at.
+- Step 1 now checks mergeability **every round** (a conflict can appear mid-watch when the base branch
+  moves); a `CONFLICTING` PR is an actionable item like a failing check.
+- The quiet-round definition (Step 2) now requires `mergeable: MERGEABLE` — not `CONFLICTING`, and not
+  a still-unsettled `UNKNOWN`.
+- Step 3 resolves the conflict first (so this round's other fixes land on the merged tree), preserves
+  both sides' intent, runs tests/linter on the merged result before pushing, and aborts + reports a
+  semantic conflict it can't confidently resolve instead of guessing.
+- The final report (Step 6) gains a **Current merge state** section; new guardrail: conflicts resolve
+  on the head branch by merge commit only.
+- Trimmed the skill `description` back under the 1024-char spec limit (it had drifted to 1049) while
+  adding the merge-conflict triggers.
 
 ## 2026-06-30
 

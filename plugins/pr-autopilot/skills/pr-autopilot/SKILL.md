@@ -1,22 +1,24 @@
 ---
 name: pr-autopilot
-description: "Autonomously watch a single pull request and drive its review feedback AND failing CI checks to completion without supervision: each round fetch every unaddressed review and comment (Claude, CodeRabbit, Copilot, other bots, humans) plus the PR's check runs (test failures, lint, formatting, type, build, and security checks), address the actionable ones, commit, push, reply/resolve threads, and re-request review from the bots whose change requests it addressed, then loop until a quiet round or a safety cap and print a summary. Use whenever the user wants to 'watch a PR', 'babysit a PR', 'keep addressing PR comments until they are done', 'fix the failing checks on a PR', 'get CI green', 'auto-respond to reviews', 'handle the review back-and-forth on PR #N', or run a hands-off review-response loop on ONE PR — even if they don't name this skill. Pass --single-pass (or --max-rounds 1) for a single autonomous round with no loop, a one-shot comment-and-checks sweep. For driving MANY stacked PRs from a parent ticket, see /implement-full-spec."
+description: "Autonomously watch a single pull request and drive its review feedback, failing CI checks, AND merge conflicts to completion without supervision: each round fetch every unaddressed review and comment (Claude, CodeRabbit, Copilot, other bots, humans), the PR's check runs (tests, lint, type, build, security), and its mergeability; address the actionable ones (resolving conflicts by merging the base branch into the head), commit, push, reply/resolve threads, and re-request review from bots whose change requests were addressed, then loop until a quiet round or a safety cap. Use whenever the user wants to 'watch a PR', 'babysit a PR', 'keep addressing PR comments until done', 'fix the failing checks', 'get CI green', 'resolve the merge conflict on PR #N', 'auto-respond to reviews', or run a hands-off review-response loop on ONE PR, even if they don't name this skill. Pass --single-pass (or --max-rounds 1) for one autonomous round, no loop. For MANY stacked PRs from a parent ticket, see /implement-full-spec."
 user_invocable: true
 ---
 
 # PR Autopilot
 
-Drive a single pull request's review feedback **and its failing CI checks** to completion without
-supervision. It runs round after round on its own — committing, pushing, re-requesting review, and
-waiting for the next batch of feedback — until both the reviews *and* the checks settle down. For a
-one-shot sweep instead of a loop, run it with `--single-pass`: a single autonomous round, then stop.
+Drive a single pull request's review feedback, **its failing CI checks, and its merge conflicts** to
+completion without supervision. It runs round after round on its own — committing, pushing,
+re-requesting review, and waiting for the next batch of feedback — until the reviews, the checks,
+*and* the merge state all settle down. For a one-shot sweep instead of a loop, run it with
+`--single-pass`: a single autonomous round, then stop.
 
 **Read `${CLAUDE_PLUGIN_ROOT}/references/pr-review-mechanics.md` first** (if that path doesn't
 resolve, it's at the plugin root, two levels up from this skill:
 `../../references/pr-review-mechanics.md`). That file is the shared "how to talk to the GitHub review
 API correctly" layer — fetching all three comment sources, classifying, replying, resolving threads,
-the per-bot re-review trigger table, and (**§7**) inspecting CI check runs and reading their failure
-logs. The steps below are this skill's *control flow*: when to loop, when to commit, and when to stop.
+the per-bot re-review trigger table, (**§7**) inspecting CI check runs and reading their failure
+logs, and (**§8**) checking mergeability and resolving merge conflicts. The steps below are this
+skill's *control flow*: when to loop, when to commit, and when to stop.
 
 ## Operating mode (read this first)
 
@@ -91,6 +93,19 @@ you know what to fix, and classify per §7: **actionable** failures your change 
 / flaky / infra** failures you report rather than chase. A check still **pending / in progress** is not
 a failure — it's a pending signal for Step 2 (don't conclude until it finishes).
 
+### Also check mergeability
+
+Apply **§8 (check mergeability)** — fetch `mergeable` / `mergeStateStatus` for the PR **every round**,
+not just the first. This is a separate feedback channel: a conflict can be the *only* thing wrong with
+the PR, and it can appear mid-watch when someone merges to the base branch. **Zero new comments plus
+green checks does NOT mean the round is quiet if the PR is conflicted.**
+
+- `mergeable: CONFLICTING` (`mergeStateStatus: DIRTY`) → treat the conflict as an actionable item for
+  this round, exactly like a failing check: no thread to reply to or resolve — you address it by
+  merging the base branch into the head branch, resolving, and pushing the merge commit (§8, Step 3).
+- `mergeable: UNKNOWN` → GitHub is still computing; re-poll until it settles (§8). It's a pending
+  signal for Step 2, never a pass.
+
 ### Human reviewers
 
 Address actionable human comments the same as bots — fix, commit, reply, and re-request their review
@@ -104,11 +119,12 @@ A round is **quiet** only when **all** of these hold:
 
 - **no new actionable comments**, and
 - **no outstanding `CHANGES_REQUESTED` review from any bot**, and
-- **no failing CI checks** that are this PR's responsibility (actionable per §7).
+- **no failing CI checks** that are this PR's responsibility (actionable per §7), and
+- **no merge conflict** — `mergeable` is `MERGEABLE` (not `CONFLICTING`, and not still `UNKNOWN`).
 
-If all hold → go to Step 6 (finish and report). Otherwise continue. A failing actionable check on its
-own keeps the round non-quiet even when every comment is resolved — getting CI green is part of the
-job.
+If all hold → go to Step 6 (finish and report). Otherwise continue. A failing actionable check **or a
+merge conflict** on its own keeps the round non-quiet even when every comment is resolved — getting CI
+green and keeping the PR mergeable are part of the job.
 
 Two more conditions before calling it quiet:
 
@@ -122,12 +138,15 @@ Two more conditions before calling it quiet:
   if you just pushed, CI is re-running, so poll again rather than declaring the round quiet on a check
   that hasn't reported. Only conclude once every check has settled to pass or a non-actionable
   failure.
+- **Mergeability must have settled.** `mergeable: UNKNOWN` means GitHub is still computing (common
+  right after a push) — re-poll until it reports `MERGEABLE` or `CONFLICTING` (§8) rather than
+  declaring the round quiet on an unknown merge state.
 
 ## Step 3 — Address, commit, push
 
 Make the changes (read context, fix, group items touching the same file, run the project's
-linter/formatter if it has one). No approval gate — just do it carefully. This covers **both** the
-actionable review comments **and** the actionable failing checks from Step 1:
+linter/formatter if it has one). No approval gate — just do it carefully. This covers **all three**
+kinds of actionable item from Step 1 — review comments, failing checks, and a merge conflict:
 
 - For **review comments**, fix as described by the reviewer.
 - For **failing checks**, fix the underlying cause — make the failing tests pass, clear the lint/type
@@ -136,6 +155,14 @@ actionable review comments **and** the actionable failing checks from Step 1:
   commit, so you're not burning rounds waiting on CI to tell you what a local run would have. Don't
   paper over a failure (e.g. don't delete or skip a test) just to turn it green — if you genuinely
   can't fix a check, leave it and report it in Step 6.
+- For a **merge conflict**, merge the base branch into the PR head branch and resolve per §8 — never
+  by rebasing (that needs a force-push) and never by touching the base branch. Preserve the intent of
+  **both** sides (the base branch's changes and this PR's), then run the project's tests/linter on the
+  merged result before pushing so the resolution didn't silently break either side. If a conflict is
+  semantic and you can't confidently preserve both behaviors, leave it unresolved (`git merge
+  --abort`) and report it in Step 6 rather than guessing. Resolve the conflict **before** making this
+  round's other fixes when you can — working on top of the merged tree avoids re-conflicting your own
+  edits.
 
 Then commit and push:
 
@@ -154,10 +181,11 @@ this round, and use each bot's correct trigger (`@claude`, `@coderabbitai review
 exact `[bot]` mention for others). Combine the "Addressed" reply and the re-review ping into one
 comment when you can.
 
-**Checks need none of this.** A CI check has no comment thread to reply to or resolve and no bot to
-re-ping — pushing the fix is the whole interaction, and CI re-runs itself automatically on the new
-HEAD. The only exception is a check that needs a manual re-run after a non-code fix (a flake): `gh run
-rerun <run-id> --failed`, per §7.
+**Checks and merge conflicts need none of this.** Neither has a comment thread to reply to or resolve
+nor a bot to re-ping — pushing the fix is the whole interaction: CI re-runs itself automatically on
+the new HEAD, and GitHub recomputes mergeability after the merge commit lands (re-poll §8 until it
+reports `MERGEABLE`). The only exception is a check that needs a manual re-run after a non-code fix
+(a flake): `gh run rerun <run-id> --failed`, per §7.
 
 ## Step 5 — Wait for the next batch, then loop
 
@@ -187,7 +215,7 @@ Stop the loop and print a clear summary. Lead with **why** you stopped (quiet ro
 ```
 ## PR #123 review watch — complete
 
-Stopped: quiet round (no new actionable comments, no change requests, all checks green)
+Stopped: quiet round (no new actionable comments, no change requests, all checks green, no conflicts)
 Rounds run: 3 of 6 max · elapsed 14 min
 
 ### Addressed this session
@@ -195,6 +223,7 @@ Rounds run: 3 of 6 max · elapsed 14 min
 - claude[bot]: 2 comments → fixed in a1b2c3d (re-review requested, approved)
 - @jsmith: 1 comment → fixed in e4f5g6h (re-review requested — awaiting human response)
 - CI: `unit-tests` and `lint` were failing → fixed in a1b2c3d (both now passing)
+- Merge conflict with `main` (2 files) → resolved by merge commit f6a7b8c (now MERGEABLE)
 
 ### Still outstanding
 - @jsmith: 1 question ("why this approach?") — left for you, not a change request
@@ -207,12 +236,16 @@ Rounds run: 3 of 6 max · elapsed 14 min
 - unit-tests: pass · lint: pass · typecheck: pass · security-scan: pass
 - coverage: FAILING — pre-existing on base branch, not introduced by this PR (left as-is)
 
+### Current merge state
+- mergeable: MERGEABLE — no conflicts with `main`
+
 PR: https://github.com/owner/repo/pull/123
 ```
 
-Always include the **check state** section so the user can see CI is green (or exactly which checks
-aren't, and why you left them). If you stopped on a cap, say so plainly and list what's still
-unaddressed — outstanding comments **and** still-red checks — so the user can decide whether to re-run
+Always include the **check state** and **merge state** sections so the user can see CI is green and
+the PR is mergeable (or exactly which checks aren't / which files still conflict, and why you left
+them). If you stopped on a cap, say so plainly and list what's still unaddressed — outstanding
+comments, still-red checks, **and any unresolved conflict** — so the user can decide whether to re-run
 the watch or step in.
 
 ## Guardrails
@@ -226,6 +259,11 @@ the watch or step in.
   secret, env file, credential, or anything outside this round's fix (reinforces "don't `git add -A`").
 - **Branch safety:** only ever commit/push to the PR's head branch; never force-push; never touch the
   base/default branch.
+- **Conflicts resolve on the head branch, by merge:** fix a merge conflict by merging the base branch
+  *into* the PR head branch and pushing the merge commit — never by rebasing (which requires a
+  force-push) and never by pushing anything to the base branch. Preserve both sides' intent when
+  resolving; if you can't confidently resolve a semantic conflict, `git merge --abort` and report it
+  rather than guessing.
 - **No false resolutions:** only reply "Addressed in `<hash>`" / resolve a thread for a change you
   actually made and pushed. If you chose not to act on a comment, leave it open and report it.
 - **No gaming a green check:** make a failing check pass by fixing the real cause, never by deleting,
